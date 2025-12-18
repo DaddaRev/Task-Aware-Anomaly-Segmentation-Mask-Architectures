@@ -4,4 +4,79 @@
 
 
     AUPRC score:13.194873989049796   FPR@TPR95:97.01270448916142
-    AUPRC score:13.194873989049796   FPR@TPR95:97.01270448916142
+    AUPRC score:13.194873989049796   FPR@TPR95:97.01270448916142RoadAnomaly21 MSP
+RoadAnomaly21 MaxLogit
+RoadAnomaly21 MaxEntropy
+RoadAnomaly21 MSP
+RoadAnomaly21 MaxLogit
+RoadAnomaly21 MaxEntropy
+FS_LostFound_full MSP
+FS_LostFound_full MaxLogit
+RoadAnomaly21 MSP
+RoadAnomaly21 MaxLogit
+RoadAnomaly21 MaxEntropy
+FS_LostFound_full MSP
+RoadAnomaly21 MSP
+RoadAnomaly21 MaxLogit
+RoadAnomaly21 MaxEntropy
+RoadObstacle21 MSP
+RoadObstacle21 MaxLogit
+RoadObstacle21 MaxEntropy
+FS_LostFound_full MSP
+FS_LostFound_full MaxLogit
+FS_LostFound_full MaxEntropy
+fs_static MSP
+fs_static MaxLogit
+fs_static MaxEntropy
+RoadAnomaly MSP
+RoadAnomaly MaxLogit
+RoadAnomaly MaxEntropy
+
+RoadAnomaly21 MSP
+RoadAnomaly21 MaxLogit
+RoadAnomaly21 MaxEntropy
+RoadObstacle21 MSP
+RoadObstacle21 MaxLogit
+RoadObstacle21 MaxEntropy
+FS_LostFound_full MSP
+FS_LostFound_full MaxLogit
+FS_LostFound_full MaxEntropy
+fs_static MSP
+fs_static MaxLogit
+fs_static MaxEntropy
+RoadAnomaly MSP
+RoadAnomaly MaxLogit
+RoadAnomaly MaxEntropy
+
+RoadAnomaly21 MSP
+RoadAnomaly21 MaxLogit
+RoadAnomaly21 MaxEntropy
+RoadObstacle21 MSP
+RoadObstacle21 MaxLogit
+RoadObstacle21 MaxEntropy
+FS_LostFound_full MSP
+FS_LostFound_full MaxLogit
+FS_LostFound_full MaxEntropy
+fs_static MSP
+fs_static MaxLogit
+fs_static MaxEntropy
+RoadAnomaly MSP
+RoadAnomaly MaxLogit
+RoadAnomaly MaxEntropy
+
+RoadAnomaly21 MSP
+RoadAnomaly21 MaxLogit
+RoadAnomaly21 MaxEntropy
+RoadObstacle21 MSP
+RoadObstacle21 MaxLogit
+RoadObstacle21 MaxEntropy
+FS_LostFound_full MSP
+FS_LostFound_full MaxLogit
+FS_LostFound_full MaxEntropy
+fs_static MSP
+fs_static MaxLogit
+fs_static MaxEntropy
+RoadAnomaly MSP
+RoadAnomaly MaxLogit
+RoadAnomaly MaxEntropy
+

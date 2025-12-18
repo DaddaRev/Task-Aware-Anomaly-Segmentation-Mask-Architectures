@@ -20,7 +20,6 @@ from dataset import cityscapes
 from erfnet import ERFNet
 from transform import Relabel, ToLabel, Colorize
 
-
 NUM_CHANNELS = 3
 NUM_CLASSES = 20
 
@@ -33,11 +32,11 @@ input_transform_cityscapes = Compose([
 target_transform_cityscapes = Compose([
     Resize(512),
     ToLabel(),
-    Relabel(255, 19),   #ignore label to 19
+    Relabel(255, 19),  #ignore label to 19
 ])
 
 cityscapes_trainIds2labelIds = Compose([
-    Relabel(19, 255),  
+    Relabel(19, 255),
     Relabel(18, 33),
     Relabel(17, 32),
     Relabel(16, 31),
@@ -62,13 +61,13 @@ cityscapes_trainIds2labelIds = Compose([
     Resize(1024, Image.NEAREST),
 ])
 
-def main(args):
 
+def main(args):
     modelpath = args.loadDir + args.loadModel
     weightspath = args.loadDir + args.loadWeights
 
-    print ("Loading model: " + modelpath)
-    print ("Loading weights: " + weightspath)
+    print("Loading model: " + modelpath)
+    print("Loading weights: " + weightspath)
 
     #Import ERFNet model from the folder
     #Net = importlib.import_module(modelpath.replace("/", "."), "ERFNet")
@@ -85,20 +84,20 @@ def main(args):
         own_state = model.state_dict()
         for name, param in state_dict.items():
             if name not in own_state:
-                 continue
+                continue
             own_state[name].copy_(param)
         return model
 
     model = load_my_state_dict(model, torch.load(weightspath))
-    print ("Model and weights LOADED successfully")
+    print("Model and weights LOADED successfully")
 
     model.eval()
 
-    if(not os.path.exists(args.datadir)):
-        print ("Error: datadir could not be loaded")
+    if (not os.path.exists(args.datadir)):
+        print("Error: datadir could not be loaded")
 
-
-    loader = DataLoader(cityscapes(args.datadir, input_transform_cityscapes, target_transform_cityscapes, subset=args.subset),
+    loader = DataLoader(
+        cityscapes(args.datadir, input_transform_cityscapes, target_transform_cityscapes, subset=args.subset),
         num_workers=args.num_workers, batch_size=args.batch_size, shuffle=False)
 
     for step, (images, labels, filename, filenameGt) in enumerate(loader):
@@ -120,16 +119,15 @@ def main(args):
         #image_transform(label.byte()).save(filenameSave)
         label_cityscapes.save(filenameSave)
 
-        print (step, filenameSave)
+        print(step, filenameSave)
 
-    
 
 if __name__ == '__main__':
     parser = ArgumentParser()
 
     parser.add_argument('--state')
 
-    parser.add_argument('--loadDir',default="../trained_models/")
+    parser.add_argument('--loadDir', default="../trained_models/")
     parser.add_argument('--loadWeights', default="erfnet_pretrained.pth")
     parser.add_argument('--loadModel', default="erfnet.py")
     parser.add_argument('--subset', default="val")  #can be val, test, train, demoSequence
