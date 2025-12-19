@@ -11,9 +11,21 @@ import numpy as np
 
 from erfnet import ERFNet
 import os.path as osp
-from ood_metrics import fpr_at_95_tpr, calc_metrics, plot_roc, plot_pr, plot_barcode
 from sklearn.metrics import roc_auc_score, roc_curve, auc, precision_recall_curve, average_precision_score
 from torchvision.transforms import Compose, Resize, ToTensor, Normalize
+
+
+def fpr_at_95_tpr(scores, labels):
+    """
+    Calculates the False Positive Rate (FPR) when the True Positive Rate (TPR) is 95%
+    """
+    fpr, tpr, thresholds = roc_curve(labels, scores)
+    if all(tpr < 0.95):
+        return 1.0
+    # Find the index where TPR is at least 0.95
+    idx = np.argmax(tpr >= 0.95)
+    return fpr[idx]
+
 
 seed = 42
 
@@ -69,7 +81,6 @@ def load_config(path: str) -> dict:
 
 
 def main():
-
     config_path = sys.argv[1] if len(sys.argv) > 1 else "configs/eval_config.toml"
     cfg = load_config(config_path)
 

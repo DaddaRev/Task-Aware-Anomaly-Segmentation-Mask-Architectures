@@ -6,6 +6,7 @@ eomt/eomt_trained_model
 eomt/checksum*
 results
 
+.idea
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
