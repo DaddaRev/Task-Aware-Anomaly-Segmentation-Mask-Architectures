@@ -1,0 +1,32 @@
+device = "auto"          # "auto", "cuda", "mps", "cpu"
+outdir = "results_erfnet"
+
+loadDir = "../trained_models/"
+loadWeights = "erfnet_pretrained.pth"
+
+baselines = ["MSP", "MaxLogit", "MaxEntropy"]
+
+[[datasets]]
+name = "RoadAnomaly21"
+table_name = "SMIYC RA-21"
+images_glob = "validation_datasets/RoadAnomaly21/images/*"
+
+[[datasets]]
+name = "RoadObstacle21"
+table_name = "SMIYC RO-21"
+images_glob = "validation_datasets/RoadObstacle21/images/*"
+
+[[datasets]]
+name = "FS_LostFound_full"
+table_name = "FS L&F"
+images_glob = "validation_datasets/FS_LostFound_full/images/*"
+
+[[datasets]]
+name = "fs_static"
+table_name = "FS Static"
+images_glob = "validation_datasets/fs_static/images/*"
+
+[[datasets]]
+name = "RoadAnomaly"
+table_name = "Road Anomaly"
+images_glob = "validation_datasets/RoadAnomaly/images/*"
