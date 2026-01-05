@@ -1,5 +1,5 @@
 trainer:
-  max_epochs: 107
+  max_epochs: 10
   logger:
     class_path: lightning.pytorch.loggers.wandb.WandbLogger
     init_args:
@@ -35,4 +35,4 @@ data:
         image_glob: "*.jpg"
         mask_ext: "png"
         gt_format: binary_255_is_ood
-        skip_no_ood: true
+        skip_no_ood: false

@@ -31,6 +31,11 @@ class MCS_Anomaly(MaskClassificationSemantic):
             if attn_mask_annealing_end_steps is None:
                 attn_mask_annealing_end_steps = [0] * default_len
 
+        # FIX: Riduciamo i coefficienti per il fine-tuning per evitare loss esplosive
+        # Sovrascriviamo i default se non presenti in kwargs
+        kwargs.setdefault('mask_coefficient', 2.0)  # Default era 5.0
+        kwargs.setdefault('dice_coefficient', 2.0)  # Default era 5.0
+        kwargs.setdefault('class_coefficient', 2.0) # Default era 2.0
         super().__init__(
             network=network,
             img_size=img_size,
@@ -118,7 +123,7 @@ class MCS_Anomaly(MaskClassificationSemantic):
                 list(zip(mask_logits_per_block, class_logits_per_block, anomaly_score_per_block))
         ):
             class_queries_logits = torch.cat(
-                [anomaly_scores, torch.zeros_like(anomaly_scores)], dim=-1
+                [anomaly_scores, -anomaly_scores], dim=-1
             )
 
             losses = self.criterion(
