@@ -7,19 +7,32 @@ trainer:
       project: "eomt"
       name: "cityscapes_semantic_eomt_base_640"
 model:
-  class_path: training.mask_classification_semantic.MaskClassificationSemantic
+  class_path: training.mask_classification_semantic_anomaly.MCS_Anomaly
   init_args:
     attn_mask_annealing_enabled: True
-    attn_mask_annealing_start_steps: [3317, 8292, 13268]
-    attn_mask_annealing_end_steps: [6634, 11609, 16585]
+    attn_mask_annealing_start_steps: [ 3317, 8292, 13268 ]
+    attn_mask_annealing_end_steps: [ 6634, 11609, 16585 ]
+
     network:
-      class_path: models.eomt.EoMT_EXT
+      class_path: models.eomt_ext.EoMT_EXT
       init_args:
         num_q: 100
+        num_classes: 1
         num_blocks: 3
         encoder:
           class_path: models.vit.ViT
           init_args:
             backbone_name: vit_base_patch14_reg4_dinov2
 data:
-  class_path: dsets.cityscapes_semantic.CityscapesSemantic
+  class_path: dsets.training_anomaly.GenericAnomalyDataset
+  init_args:
+    img_size: [ 1024, 1024 ]
+    datasets:
+      - name: FS_Static
+        root: eomt_trained_model/Validation_Dataset/fs_static
+        images_dir: images
+        masks_dir: labels_masks
+        image_glob: "*.jpg"
+        mask_ext: "png"
+        gt_format: binary_255_is_ood
+        skip_no_ood: true

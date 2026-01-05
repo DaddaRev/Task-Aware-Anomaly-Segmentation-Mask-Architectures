@@ -6,6 +6,7 @@ from PIL import Image
 import torch
 from torch.utils.data import Dataset
 from torchvision.transforms import Compose, Resize, PILToTensor, ToTensor
+from .lightning_data_module import LightningDataModule
 
 IGNORE_INDEX = 255
 
@@ -35,7 +36,7 @@ def normalize_gt(gt: np.ndarray, gt_format: str) -> np.ndarray:
     raise ValueError(f"Unknown gt_format='{gt_format}'")
 
 
-class GenericAnomalyDataset(Dataset):
+class GenericAnomalyDataset(LightningDataModule):
     """
     Class representing a generic anomaly dataset.
 
