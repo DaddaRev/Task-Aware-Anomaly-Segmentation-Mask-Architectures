@@ -1,5 +1,5 @@
 import torch
-import torch._dynamo  # Necessario per disabilitare la compilazione su Windows
+import torch._dynamo
 from torch import nn
 import torch.nn.functional as F
 from typing import Optional, List
@@ -20,7 +20,6 @@ class MCS_Anomaly(MaskClassificationSemantic):
             attn_mask_annealing_end_steps: Optional[List[int]] = None,
             **kwargs
     ):
-        # num_classes = 1 impone che l'unica classe "oggetto" per la Loss sia la 0.
         num_classes_model = 1
 
         if attn_mask_annealing_enabled:
@@ -31,11 +30,12 @@ class MCS_Anomaly(MaskClassificationSemantic):
             if attn_mask_annealing_end_steps is None:
                 attn_mask_annealing_end_steps = [0] * default_len
 
-        # FIX: Riduciamo i coefficienti per il fine-tuning per evitare loss esplosive
-        # Sovrascriviamo i default se non presenti in kwargs
-        kwargs.setdefault('mask_coefficient', 2.0)  # Default era 5.0
-        kwargs.setdefault('dice_coefficient', 2.0)  # Default era 5.0
-        kwargs.setdefault('class_coefficient', 2.0) # Default era 2.0
+        # Coefficienti ottimizzati per stabilità
+        kwargs.setdefault('mask_coefficient', 2.0)
+        kwargs.setdefault('dice_coefficient', 2.0)
+        kwargs.setdefault('class_coefficient', 2.0)
+        kwargs.setdefault('no_object_weight', 0.1)
+
         super().__init__(
             network=network,
             img_size=img_size,
@@ -51,7 +51,6 @@ class MCS_Anomaly(MaskClassificationSemantic):
         num_layers = self.network.num_blocks + 1 if getattr(self.network, 'masked_attn_enabled', False) else 1
         self.init_metrics_semantic(self.ignore_idx, num_layers)
 
-        # Strategia di Congelamento
         for param in self.network.parameters():
             param.requires_grad = True
 
@@ -60,32 +59,23 @@ class MCS_Anomaly(MaskClassificationSemantic):
             for param in self.network.encoder.parameters():
                 param.requires_grad = False
         else:
-            print("Warning: 'encoder' attribute not found in network. Backbone might not be frozen!")
+            print("Warning: 'encoder' attribute not found. Backbone might not be frozen!")
 
-        # Buffer per la normalizzazione (ImageNet stats)
         self.register_buffer("pixel_mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
         self.register_buffer("pixel_std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
 
-    def train(self, mode: bool = True):
-        super().train(mode)
-        if mode:
-            self.network.train()
-            if hasattr(self.network, 'encoder'):
-                self.network.encoder.eval()
-
     def _preprocess_images(self, imgs):
-        """
-        Corregge l'input:
-        1. Se uint8 [0-255] -> converte in float [0-1].
-        2. Applica normalizzazione ImageNet (richiesta da DINOv2/ViT).
-        """
+        """Normalizza le immagini per la backbone (ImageNet stats)."""
         if imgs.dtype == torch.uint8:
             imgs = imgs.float() / 255.0
-
-        # Normalizzazione
         imgs = (imgs - self.pixel_mean) / self.pixel_std
         return imgs
 
+    def forward(self, x):
+        # FIX CRITICO: Applichiamo la normalizzazione qui!
+        # Senza questo, la rete riceve raw pixels e non impara nulla.
+        x = self._preprocess_images(x)
+        return self.network(x)
 
     def _unstack_targets(self, imgs, targets):
         if isinstance(targets, dict):
@@ -93,14 +83,11 @@ class MCS_Anomaly(MaskClassificationSemantic):
             return [{k: v[i] for k, v in targets.items()} for i in range(batch_size)]
         return targets
 
-    # --- FIX WINDOWS: Disabilita torch.compile ---
     def training_step(self, batch, batch_idx):
         imgs, targets = batch
-
-        # Nota: Passiamo 'imgs' (uint8) direttamente a self().
-        # La normalizzazione avviene dentro forward().
         targets = self._unstack_targets(imgs, targets)
 
+        # self(imgs) ora chiama forward() che normalizza
         mask_logits_per_block, class_logits_per_block, anomaly_score_per_block = self(imgs)
 
         filtered_targets = []
@@ -122,8 +109,9 @@ class MCS_Anomaly(MaskClassificationSemantic):
         for i, (mask_logits, class_logits, anomaly_scores) in enumerate(
                 list(zip(mask_logits_per_block, class_logits_per_block, anomaly_score_per_block))
         ):
+            # FIX: [score, 0] allinea la scala con eval_step e stabilizza i gradienti
             class_queries_logits = torch.cat(
-                [anomaly_scores, -anomaly_scores], dim=-1
+                [anomaly_scores, torch.zeros_like(anomaly_scores)], dim=-1
             )
 
             losses = self.criterion(
@@ -137,22 +125,15 @@ class MCS_Anomaly(MaskClassificationSemantic):
 
         return self.criterion.loss_total(losses_all_blocks, self.log)
 
-    # --- FIX WINDOWS: Disabilita torch.compile ---
-    @torch._dynamo.disable
     def eval_step(self, batch, batch_idx=None, log_prefix=None):
         imgs, targets = batch
-
-        # Nota: 'imgs' qui è uint8. Questo è FONDAMENTALE per window_imgs_semantic
-        # che usa PIL e si aspetta uint8. Se normalizzassimo qui, PIL crascherebbe.
         targets = self._unstack_targets(imgs, targets)
-
         img_sizes = [img.shape[-2:] for img in imgs]
 
-        # Crea i ritagli (crops) dalle immagini originali
+        # window_imgs_semantic usa PIL/uint8, quindi passiamo imgs grezze
         crops, origins = self.window_imgs_semantic(imgs)
 
-        # Passiamo i crops (ancora uint8) a self().
-        # forward() li normalizzerà prima di passarli alla rete.
+        # self(crops) normalizzerà internamente grazie al nuovo forward()
         mask_logits_per_layer, class_logits_per_layer, anomaly_scores_per_layer = self(crops)
 
         targets = self.to_per_pixel_targets_semantic(targets, self.ignore_idx)
@@ -160,12 +141,14 @@ class MCS_Anomaly(MaskClassificationSemantic):
         for i, (mask_logits, class_logits, anomaly_scores) in enumerate(
                 list(zip(mask_logits_per_layer, class_logits_per_layer, anomaly_scores_per_layer))
         ):
+            # Eval: [0, score].
+            # Se score > 0 -> Class 1 (Anomaly) vince.
+            # Se score < 0 -> Class 0 (Background) vince.
             class_queries_logits = torch.cat(
                 [torch.zeros_like(anomaly_scores), anomaly_scores], dim=-1
             )
 
             mask_logits = F.interpolate(mask_logits, self.img_size, mode="bilinear")
-
             crop_logits = self.to_per_pixel_logits_semantic(mask_logits, class_queries_logits)
             logits = self.revert_window_logits_semantic(crop_logits, origins, img_sizes)
 
