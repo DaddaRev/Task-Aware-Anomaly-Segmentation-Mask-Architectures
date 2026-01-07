@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
+from torchvision.utils import save_image, make_grid
 from typing import Optional, List
 
 from .mask_classification_loss import MaskClassificationLoss
@@ -19,14 +20,12 @@ class MCS_Anomaly(MaskClassificationSemantic):
             attn_mask_annealing_end_steps: Optional[List[int]] = None,
             **kwargs
     ):
-        # Estrazione parametro per evitare crash nel super().__init__
         no_object_weight_val = kwargs.pop('no_object_weight', 0.1)
 
         kwargs.setdefault('mask_coefficient', 2.0)
         kwargs.setdefault('dice_coefficient', 2.0)
         kwargs.setdefault('class_coefficient', 2.0)
         kwargs['no_object_coefficient'] = no_object_weight_val
-        # Configurazione classi: 0=Sfondo, 1=Anomalia
         self.num_classes = 2
         self.stuff_classes = range(2)
 
@@ -97,25 +96,17 @@ class MCS_Anomaly(MaskClassificationSemantic):
         for i, (mask_logits, class_logits, anomaly_logits) in enumerate(
                 list(zip(mask_logits_per_layer, class_logits_per_layer, anomaly_logits_per_layer))
         ):
-            # # --- FIX VISUALIZZAZIONE / EVAL ---
-            # # Ignoriamo completamente la funzione to_per_pixel_logits_semantic del genitore
-            # # che cerca di tagliare l'ultima classe. Facciamo il calcolo manualmente su 2 classi.
-            #
-            # # Creiamo logits binari: [Sfondo (-score), Anomalia (score)]
-            # # Se score < 0 -> vince Sfondo
-            # # Se score > 0 -> vince Anomalia
-            # class_queries_logits = torch.cat(
-            #     [-anomaly_logits, anomaly_logits], dim=-1
-            # )  # [B, Q, 2]
-
             probs_anomaly = anomaly_logits.softmax(dim=-1)
-            prob_bg_merged = probs_anomaly[..., 0] + probs_anomaly[..., 2]
-            prob_anomaly = probs_anomaly[..., 1]
-            valid_probs = torch.stack([prob_bg_merged, prob_anomaly], dim=-1)
-            mask_logits = F.interpolate(mask_logits, self.img_size, mode="bilinear")  # [B, Q, H, W]
 
-            # Calcolo manuale: Einsum (somma pesata delle maschere per probabilità classe)
-            # Softmax su 2 classi assicura che P(Sfondo) + P(Anomalia) = 1.0. Non c'è Void.
+            # --- FIX LOGICA CLASSI (Sfondo+Void=0, Anomalia=1) ---
+            valid_probs = torch.stack([
+                probs_anomaly[..., 0] + probs_anomaly[..., 2],  # Canale 0: Normal (Bg + Void)
+                probs_anomaly[..., 1]  # Canale 1: Anomaly
+            ], dim=-1)
+
+            mask_logits = F.interpolate(mask_logits, self.img_size, mode="bilinear")
+
+            # Einsum corretto: [B, Q, H, W] * [B, Q, C] -> [B, C, H, W]
             crop_logits = torch.einsum(
                 "bqhw, bqc -> bchw",
                 mask_logits.sigmoid(),
@@ -130,3 +121,50 @@ class MCS_Anomaly(MaskClassificationSemantic):
                 self.plot_semantic(
                     imgs[0], targets[0], logits[0], log_prefix, i, batch_idx
                 )
+
+    def plot_semantic(self, img, target, logits, prefix, layer_idx, batch_idx):
+        import wandb
+
+        # 1. Denormalizza Immagine Originale (Standardizzazione -> 0..1 per visualizzazione)
+        mean = self.pixel_mean.squeeze(0).cpu()
+        std = self.pixel_std.squeeze(0).cpu()
+        img_vis = img.clone().cpu() * std + mean
+        img_vis = torch.clamp(img_vis, 0, 1)  # Assicura range valido
+
+        # 2. Predizione (0=Nero, 1=Bianco)
+        pred_mask = logits.argmax(dim=0).cpu()  # [H, W]
+        # Mappa: 1 -> 1.0 (Bianco), 0 -> 0.0 (Nero)
+        pred_vis = torch.zeros_like(pred_mask, dtype=torch.float32)
+        pred_vis[pred_mask == 1] = 1.0
+        # Espande a 3 canali: [3, H, W]
+        pred_vis = pred_vis.unsqueeze(0).repeat(3, 1, 1)
+
+        # 3. Ground Truth (BG=0, Void=100, Anomaly=255)
+        target_vis = target.clone().cpu()
+        vis_t = torch.zeros_like(target_vis, dtype=torch.float32)
+
+        # Mappa Anomalia (1) a 255 (1.0 in float) -> Bianco puro
+        vis_t[target_vis == 1] = 1.0
+        # Mappa Void (255/ignore_idx) a 100 (100/255 in float) -> Grigio scuro
+        # Nota: usiamo 100.0/255.0 per avere l'esatto valore di grigio richiesto nello spazio 0..1
+        vis_t[target_vis == self.ignore_idx] = 100.0 / 255.0
+
+        target_vis_rgb = vis_t.unsqueeze(0).repeat(3, 1, 1)
+
+        # 4. Combina in un'unica immagine larga: [Img | GT | Pred]
+        comparison = torch.cat([img_vis, target_vis_rgb, pred_vis], dim=2)
+
+        # 5. Log su WandB (senza chiamare super(), per avere controllo totale)
+        # Verifica che il logger sia attivo e sia WandB
+        if hasattr(self.logger, 'experiment') and hasattr(self.logger.experiment, 'log'):
+            caption = f"{prefix}_L{layer_idx}_img_gt_pred"
+            self.logger.experiment.log({
+                f"val_images/{prefix}_layer_{layer_idx}": [
+                    wandb.Image(comparison, caption=caption)
+                ]
+            })
+
+        # (Opzionale) Mantieni il salvataggio locale per debug veloce
+        if batch_idx == 0:
+            filename = f"vis_{prefix}_layer{layer_idx}.png"
+            save_image(comparison, filename)
