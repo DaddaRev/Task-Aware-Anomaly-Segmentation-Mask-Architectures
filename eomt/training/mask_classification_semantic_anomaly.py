@@ -125,46 +125,43 @@ class MCS_Anomaly(MaskClassificationSemantic):
     def plot_semantic(self, img, target, logits, prefix, layer_idx, batch_idx):
         import wandb
 
-        # 1. Denormalizza Immagine Originale (Standardizzazione -> 0..1 per visualizzazione)
+        # 1. Denormalizza Immagine
         mean = self.pixel_mean.squeeze(0).cpu()
         std = self.pixel_std.squeeze(0).cpu()
         img_vis = img.clone().cpu() * std + mean
-        img_vis = torch.clamp(img_vis, 0, 1)  # Assicura range valido
+        img_vis = torch.clamp(img_vis, 0, 1)
 
-        # 2. Predizione (0=Nero, 1=Bianco)
-        pred_mask = logits.argmax(dim=0).cpu()  # [H, W]
-        # Mappa: 1 -> 1.0 (Bianco), 0 -> 0.0 (Nero)
-        pred_vis = torch.zeros_like(pred_mask, dtype=torch.float32)
-        pred_vis[pred_mask == 1] = 1.0
-        # Espande a 3 canali: [3, H, W]
-        pred_vis = pred_vis.unsqueeze(0).repeat(3, 1, 1)
+        # 2. Predizione: Visualizza la PROBABILITÀ pura invece dell'argmax
+        # logits[0] = Prob Sfondo, logits[1] = Prob Anomalia
+        # Usiamo direttamente logits[1] che è un float tra 0 e 1
+        anomaly_prob = logits[1].cpu()
 
-        # 3. Ground Truth (BG=0, Void=100, Anomaly=255)
+        # Espandi a 3 canali per l'immagine RGB (Grayscale heat map)
+        pred_vis = anomaly_prob.unsqueeze(0).repeat(3, 1, 1)
+
+        # (Opzionale) Se vuoi enfatizzare i valori bassi, puoi usare:
+        # pred_vis = torch.clamp(pred_vis * 2.0, 0, 1)
+
+        # 3. Ground Truth (BG=0, Void=100/255, Anomaly=1.0)
         target_vis = target.clone().cpu()
         vis_t = torch.zeros_like(target_vis, dtype=torch.float32)
-
-        # Mappa Anomalia (1) a 255 (1.0 in float) -> Bianco puro
-        vis_t[target_vis == 1] = 1.0
-        # Mappa Void (255/ignore_idx) a 100 (100/255 in float) -> Grigio scuro
-        # Nota: usiamo 100.0/255.0 per avere l'esatto valore di grigio richiesto nello spazio 0..1
-        vis_t[target_vis == self.ignore_idx] = 100.0 / 255.0
+        vis_t[target_vis == 1] = 1.0  # Bianco (Anomalia)
+        vis_t[target_vis == self.ignore_idx] = 100.0 / 255.0  # Grigio (Void)
 
         target_vis_rgb = vis_t.unsqueeze(0).repeat(3, 1, 1)
 
-        # 4. Combina in un'unica immagine larga: [Img | GT | Pred]
+        # 4. Combina
         comparison = torch.cat([img_vis, target_vis_rgb, pred_vis], dim=2)
 
-        # 5. Log su WandB (senza chiamare super(), per avere controllo totale)
-        # Verifica che il logger sia attivo e sia WandB
+        # 5. Log su WandB direttamante
         if hasattr(self.logger, 'experiment') and hasattr(self.logger.experiment, 'log'):
-            caption = f"{prefix}_L{layer_idx}_img_gt_pred"
+            caption = f"{prefix}_L{layer_idx}_img_gt_PROB"
             self.logger.experiment.log({
                 f"val_images/{prefix}_layer_{layer_idx}": [
                     wandb.Image(comparison, caption=caption)
                 ]
             })
 
-        # (Opzionale) Mantieni il salvataggio locale per debug veloce
         if batch_idx == 0:
             filename = f"vis_{prefix}_layer{layer_idx}.png"
             save_image(comparison, filename)
