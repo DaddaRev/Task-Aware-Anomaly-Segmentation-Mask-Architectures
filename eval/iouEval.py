@@ -14,38 +14,33 @@ class iouEval:
 
     def reset (self):
         classes = self.nClasses if self.ignoreIndex==-1 else self.nClasses-1
-        self.tp = torch.zeros(classes).double()
-        self.fp = torch.zeros(classes).double()
-        self.fn = torch.zeros(classes).double()        
+        self.tp = torch.zeros(classes, dtype=torch.float64, device="cpu")
+        self.fp = torch.zeros(classes, dtype=torch.float64, device="cpu")
+        self.fn = torch.zeros(classes, dtype=torch.float64, device="cpu")
 
     def addBatch(self, x, y):   #x=preds, y=targets
         #sizes should be "batch_size x nClasses x H x W"
-        
-        #print ("X is cuda: ", x.is_cuda)
-        #print ("Y is cuda: ", y.is_cuda)
-
-        if (x.is_cuda or y.is_cuda):
-            x = x.cuda()
-            y = y.cuda()
 
         #if size is "batch_size x 1 x H x W" scatter to onehot
-        if (x.size(1) == 1):
-            x_onehot = torch.zeros(x.size(0), self.nClasses, x.size(2), x.size(3))  
-            if x.is_cuda:
-                x_onehot = x_onehot.cuda()
-            x_onehot.scatter_(1, x, 1).float()
+        if x.size(1) == 1:
+            x_onehot = torch.zeros(
+                x.size(0), self.nClasses, x.size(2), x.size(3),
+                device=x.device, dtype=torch.float32
+            )
+            x_onehot.scatter_(1, x.to(torch.long), 1.0)
         else:
-            x_onehot = x.float()
+            x_onehot = x.to(dtype=torch.float32)
 
-        if (y.size(1) == 1):
-            y_onehot = torch.zeros(y.size(0), self.nClasses, y.size(2), y.size(3))
-            if y.is_cuda:
-                y_onehot = y_onehot.cuda()
-            y_onehot.scatter_(1, y, 1).float()
+        if y.size(1) == 1:
+            y_onehot = torch.zeros(
+                y.size(0), self.nClasses, y.size(2), y.size(3),
+                device=y.device, dtype=torch.float32
+            )
+            y_onehot.scatter_(1, y.to(torch.long), 1.0)
         else:
-            y_onehot = y.float()
+            y_onehot = y.to(dtype=torch.float32)
 
-        if (self.ignoreIndex != -1): 
+        if (self.ignoreIndex != -1):
             ignores = y_onehot[:,self.ignoreIndex].unsqueeze(1)
             x_onehot = x_onehot[:, :self.ignoreIndex]
             y_onehot = y_onehot[:, :self.ignoreIndex]
@@ -62,11 +57,11 @@ class iouEval:
         fpmult = x_onehot * (1-y_onehot-ignores) #times prediction says its that class and gt says its not (subtracting cases when its ignore label!)
         fp = torch.sum(torch.sum(torch.sum(fpmult, dim=0, keepdim=True), dim=2, keepdim=True), dim=3, keepdim=True).squeeze()
         fnmult = (1-x_onehot) * (y_onehot) #times prediction says its not that class and gt says it is
-        fn = torch.sum(torch.sum(torch.sum(fnmult, dim=0, keepdim=True), dim=2, keepdim=True), dim=3, keepdim=True).squeeze() 
+        fn = torch.sum(torch.sum(torch.sum(fnmult, dim=0, keepdim=True), dim=2, keepdim=True), dim=3, keepdim=True).squeeze()
 
-        self.tp += tp.double().cpu()
-        self.fp += fp.double().cpu()
-        self.fn += fn.double().cpu()
+        self.tp += tp.detach().to("cpu").to(torch.float64)
+        self.fp += fp.detach().to("cpu").to(torch.float64)
+        self.fn += fn.detach().to("cpu").to(torch.float64)
 
     def getIoU(self):
         num = self.tp
