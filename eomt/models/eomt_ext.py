@@ -33,6 +33,7 @@ class EoMT_EXT(nn.Module):
         self.register_buffer("attn_mask_probs", torch.ones(num_blocks))
 
         self.q = nn.Embedding(num_q, self.encoder.backbone.embed_dim)
+        print("EoMT_EXT: num_classes =", num_classes)
 
         self.class_head = nn.Linear(self.encoder.backbone.embed_dim, num_classes + 1)
 

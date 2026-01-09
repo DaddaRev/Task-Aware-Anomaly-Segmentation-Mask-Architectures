@@ -14,18 +14,33 @@ class MCS_Anomaly(MaskClassificationSemantic):
             self,
             network: nn.Module,
             img_size: tuple[int, int],
-            num_classes: int,
             attn_mask_annealing_enabled: bool,
             attn_mask_annealing_start_steps: Optional[List[int]] = None,
             attn_mask_annealing_end_steps: Optional[List[int]] = None,
+            num_points: int = 12544,
+            num_classes: int = 19,
+            ignore_idx: int = 255,
+            lr: float = 1e-4,
+            llrd: float = 0.8,
+            llrd_l2_enabled: bool = True,
+            lr_mult: float = 1.0,
+            weight_decay: float = 0.05,
+            oversample_ratio: float = 3.0,
+            importance_sample_ratio: float = 0.75,
+            poly_power: float = 0.9,
+            warmup_steps: List[int] = [500, 1000],
+            mask_coefficient: float = 2.0,
+            dice_coefficient: float = 2.0,
+            class_coefficient: float = 2.0,
+            mask_thresh: float = 0.8,
+            overlap_thresh: float = 0.8,
+            ckpt_path: Optional[str] = None,
+            delta_weights: bool = False,
+            load_ckpt_class_head: bool = True,
             **kwargs
     ):
-        no_object_weight_val = kwargs.pop('no_object_weight', 0.1)
 
-        kwargs.setdefault('mask_coefficient', 2.0)
-        kwargs.setdefault('dice_coefficient', 2.0)
-        kwargs.setdefault('class_coefficient', 2.0)
-        kwargs['no_object_coefficient'] = no_object_weight_val
+        no_object_coefficient = 1.0
 
         super().__init__(
             network=network,
@@ -38,14 +53,14 @@ class MCS_Anomaly(MaskClassificationSemantic):
         )
 
         self.criterion_anomalymask = MaskClassificationLoss(
-            num_points=self.num_points,
-            oversample_ratio=self.oversample_ratio,
-            importance_sample_ratio=self.importance_sample_ratio,
-            mask_coefficient=self.mask_coefficient,
-            dice_coefficient=self.dice_coefficient,
-            class_coefficient=self.class_coefficient,
+            num_points=num_points,
+            oversample_ratio=oversample_ratio,
+            importance_sample_ratio=importance_sample_ratio,
+            mask_coefficient=mask_coefficient,
+            dice_coefficient=dice_coefficient,
+            class_coefficient=class_coefficient,
             num_labels=2,
-            no_object_coefficient=self.no_object_coefficient,
+            no_object_coefficient=no_object_coefficient,
         )
 
         num_layers = self.network.num_blocks + 1 if getattr(self.network, 'masked_attn_enabled', False) else 1
@@ -53,6 +68,19 @@ class MCS_Anomaly(MaskClassificationSemantic):
 
         self.register_buffer("pixel_mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
         self.register_buffer("pixel_std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
+
+        for param in self.network.parameters():
+            param.requires_grad = False
+
+        if hasattr(self.network, 'anomaly_head'):
+            print("Unfreezing anomaly_head params...")
+            for param in self.network.anomaly_head.parameters():
+                param.requires_grad = True
+
+        if hasattr(self.network, 'mask_head'):
+            print("Unfreezing mask_head params...")
+            for param in self.network.mask_head.parameters():
+                param.requires_grad = True
 
     def _preprocess_images(self, imgs):
         if imgs.dtype == torch.uint8:
@@ -112,7 +140,6 @@ class MCS_Anomaly(MaskClassificationSemantic):
             #     probs_anomaly[..., 0] + probs_anomaly[..., 2],  # Canale 0: Normal (Bg + Void)
             #     probs_anomaly[..., 1]  # Canale 1: Anomaly
             # ], dim=-1)
-            print(anomaly_logits.shape)
 
             mask_logits = F.interpolate(mask_logits, self.img_size, mode="bilinear")
 

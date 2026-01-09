@@ -17,7 +17,6 @@ model:
       class_path: models.eomt_ext.EoMT_EXT
       init_args:
         num_q: 100
-        num_classes: 19
         num_blocks: 3
         encoder:
           class_path: models.vit.ViT
@@ -28,11 +27,11 @@ data:
   init_args:
     img_size: [ 1024, 1024 ]
     datasets:
-      - name: RoadAnomaly
-        root: eomt_trained_model/Validation_Dataset/RoadAnomaly
+      - name: FS_LostFound_full
+        root: eomt_trained_model/Validation_Dataset/FS_LostFound_full
         images_dir: images
         masks_dir: labels_masks
-        image_glob: "*.jpg"
+        image_glob: "*.png"
         mask_ext: "png"
         gt_format: binary_any_nonzero_is_ood_void255
-        skip_no_ood: false
+        skip_no_ood: true
