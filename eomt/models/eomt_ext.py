@@ -36,7 +36,7 @@ class EoMT_EXT(nn.Module):
 
         self.class_head = nn.Linear(self.encoder.backbone.embed_dim, num_classes + 1)
 
-        self.anomaly_head = nn.Linear(self.encoder.backbone.embed_dim, 3)
+        self.anomaly_head = nn.Linear(self.encoder.backbone.embed_dim, 3) #bg, anomaly, void
 
         self.mask_head = nn.Sequential(
             nn.Linear(self.encoder.backbone.embed_dim, self.encoder.backbone.embed_dim),
@@ -53,6 +53,7 @@ class EoMT_EXT(nn.Module):
         self.upscale = nn.Sequential(
             *[ScaleBlock(self.encoder.backbone.embed_dim) for _ in range(num_upscale)],
         )
+
 
     def _predict(self, x: torch.Tensor):
         q = x[:, : self.num_q, :]

@@ -26,8 +26,6 @@ class MCS_Anomaly(MaskClassificationSemantic):
         kwargs.setdefault('dice_coefficient', 2.0)
         kwargs.setdefault('class_coefficient', 2.0)
         kwargs['no_object_coefficient'] = no_object_weight_val
-        self.num_classes = 2
-        self.stuff_classes = range(2)
 
         super().__init__(
             network=network,
@@ -37,6 +35,17 @@ class MCS_Anomaly(MaskClassificationSemantic):
             attn_mask_annealing_start_steps=attn_mask_annealing_start_steps,
             attn_mask_annealing_end_steps=attn_mask_annealing_end_steps,
             **kwargs
+        )
+
+        self.criterion_anomalymask = MaskClassificationLoss(
+            num_points=self.num_points,
+            oversample_ratio=self.oversample_ratio,
+            importance_sample_ratio=self.importance_sample_ratio,
+            mask_coefficient=self.mask_coefficient,
+            dice_coefficient=self.dice_coefficient,
+            class_coefficient=self.class_coefficient,
+            num_labels=2,
+            no_object_coefficient=self.no_object_coefficient,
         )
 
         num_layers = self.network.num_blocks + 1 if getattr(self.network, 'masked_attn_enabled', False) else 1
@@ -71,7 +80,7 @@ class MCS_Anomaly(MaskClassificationSemantic):
         for i, (mask_logits, class_logits, anomaly_logits) in enumerate(
                 list(zip(mask_logits_per_block, class_logits_per_block, anomaly_logits_per_block))
         ):
-            losses = self.criterion(
+            losses = self.criterion_anomalymask(
                 masks_queries_logits=mask_logits,
                 class_queries_logits=anomaly_logits,
                 targets=targets,
@@ -143,7 +152,7 @@ class MCS_Anomaly(MaskClassificationSemantic):
         # 2. Predizione (Probabilità)
         # logits shape: [NumClasses(3 o 2), H, W]. Indice 1 = Anomalia.
         # Applichiamo Softmax per avere probabilità valide 0..1
-        print(logits.shape)  #2x1024x1024
+        #print(logits.shape)  #2x1024x1024
         sum_scores = logits.sum(dim=0, keepdim=True) + 1e-6
         probs = (logits / sum_scores).cpu()
         prob_vis = probs[1] #anomaly probs
