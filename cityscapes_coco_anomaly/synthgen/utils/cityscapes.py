@@ -16,7 +16,6 @@ def resolve_cityscapes_datadir(datadir: str) -> Path:
     if not (path := Path(datadir).expanduser().resolve()).exists():
         raise FileNotFoundError(f"`{path.expanduser().resolve()}` does not exist")
 
-    # for compatibility reason with the previous version of this script
     if (path / "gtFine").exists() and (path / "leftImg8bit").exists():
         out_root = path
     else:
@@ -29,9 +28,10 @@ def resolve_cityscapes_datadir(datadir: str) -> Path:
                                     "Provide either a folder containing `gtFine` and `leftImg8bit`"
                                     "or a folder containing `leftImg8bit_*.zip` and `gtFine_*.zip`")
 
-        print(f"Extracting Cityscapes dataset to {path / '_cityscapes_tmp'}...")
+        out_root = path
         tmp_dir = path / "_cityscapes_tmp"
-        out_root = path / "cityscapes"
+
+        print(f"Extracting Cityscapes dataset to {path / '_cityscapes_tmp'}...")
 
         with zipfile.ZipFile(left_zip, "r") as zf:
             zf.extractall(tmp_dir)
@@ -53,9 +53,9 @@ def resolve_cityscapes_datadir(datadir: str) -> Path:
         out_gt = out_root / "gtFine"
         out_left = out_root / "leftImg8bit"
 
-        # Refresh outputs to avoid mixing old/new data
-        if out_gt.exists(): shutil.rmtree(out_gt)
-        if out_left.exists(): shutil.rmtree(out_left)
+        # # Refresh outputs to avoid mixing old/new data
+        # if out_gt.exists(): shutil.rmtree(out_gt)
+        # if out_left.exists(): shutil.rmtree(out_left)
 
         shutil.copytree(gt_dir, out_gt)
         shutil.copytree(left_dir, out_left)

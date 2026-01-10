@@ -18,8 +18,6 @@ class PatchGeom:
     """
     Geometry outcome for one pasted instance.
     """
-    x: int
-    y: int
     scale: float
     hflip: bool
     out_h: int
@@ -85,7 +83,7 @@ def _resize_rgb_alpha(
     if alpha.min() < 0 or alpha.max() > 1.0:
         raise ValueError("alpha must be in [0,1]")
 
-    a_res = cv2.resize(alpha, (out_w, out_h), interpolation=cv2.INTER_LINEAR)
+    a_res = cv2.resize(alpha, (out_w, out_h), interpolation=cv2.INTER_NEAREST)
     a_res = np.clip(a_res, 0.0, 1.0).astype(np.float32)
     return rgb, a_res
 
@@ -128,7 +126,7 @@ def compute_patch_geometry(
     out_h = max(1, out_h)
 
     # Optional random flip
-    hflip = (not geo_cfg.random_horizontal_flip) or bool(rng.random() < 0.5)
+    hflip = bool(rng.random() < 0.5) if geo_cfg.random_horizontal_flip else False
 
     # Area ratio constraints: if out of bounds, try to adjust scale deterministically
     # Strategy:
@@ -162,8 +160,6 @@ def compute_patch_geometry(
         out_h = max(1, int(round(patch_h * scale)))
 
     return PatchGeom(
-        x=-1,  # filled later by location sampler
-        y=-1,  # filled later by location sampler
         scale=float(scale),
         hflip=hflip,
         out_h=out_h,

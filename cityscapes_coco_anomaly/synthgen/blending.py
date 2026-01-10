@@ -56,25 +56,34 @@ def parse_blending_cfg(synthesis_cfg: dict[str, Any]) -> BlendingConfig:
 
 def feather_alpha(alpha: np.ndarray, feather_px: int) -> np.ndarray:
     """
-    Feather/smooth mask edges by applying a small Gaussian blur.
-    Input alpha must be float32 in [0,1]
+    Feather/smooth mask edges while keeping object interior solid.
     """
     if alpha.dtype != np.float32:
         raise TypeError("alpha must be float32 in [0,1]")
-
     if alpha.min() < 0 or alpha.max() > 1.0:
         raise ValueError("alpha must be in [0,1]")
 
     if feather_px <= 0:
         return alpha
 
-    # Kernel size: odd and related to feather_px
+    # Start from a binary mask (alpha comes from an instance mask)
+    m = (alpha > 0.5).astype(np.float32)
+
+    # Blur to create soft edges
     k = int(max(3, 2 * feather_px + 1))
     if k % 2 == 0:
         k += 1
 
-    a_blur = cv2.GaussianBlur(alpha, (k, k), sigmaX=0, sigmaY=0, borderType=cv2.BORDER_DEFAULT)
-    return np.clip(a_blur, 0.0, 1.0).astype(np.float32)
+    a_blur = cv2.GaussianBlur(m, (k, k), sigmaX=0, sigmaY=0, borderType=cv2.BORDER_DEFAULT)
+
+    # Keep interior solid
+    core_kernel = np.ones((k, k), dtype=np.uint8)
+    core = cv2.erode((m > 0).astype(np.uint8), core_kernel, iterations=1)
+
+    a_blur = np.clip(a_blur, 0.0, 1.0).astype(np.float32)
+    a_blur[core > 0] = 1.0
+
+    return a_blur
 
 
 def _rgb_to_lab(img_rgb_u8: np.ndarray) -> np.ndarray:
@@ -162,11 +171,16 @@ def alpha_composite(bg_rgb: np.ndarray, patch_rgb: np.ndarray, alpha: np.ndarray
     if bg_rgb.shape[:2] != alpha.shape or patch_rgb.shape[:2] != alpha.shape:
         raise ValueError("Shape mismatch for alpha compositing")
 
-    a3 = alpha[..., None]  # HxWx1
+    a = alpha[..., None]  # HxWx1
     bg = bg_rgb.astype(np.float32)
     fg = patch_rgb.astype(np.float32)
 
-    out = a3 * fg + (1.0 - a3) * bg
+    # # make alpha more solid
+    a **= 0.6
+    # increase interior alpha to avoid ghost-like objects
+    a = np.where(a > 0.35, 0.85, a)
+
+    out = a * fg + (1.0 - a) * bg
     return np.clip(out, 0, 255).astype(np.uint8)
 
 

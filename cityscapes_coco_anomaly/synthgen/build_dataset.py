@@ -9,11 +9,22 @@ from cityscapes_coco_anomaly.synthgen.utils.coco import decode_coco_segmentation
 from cityscapes_coco_anomaly.synthgen.cityscapes_index import build_cityscapes_index, iter_cityscapes_pairs
 from cityscapes_coco_anomaly.synthgen.coco_index import build_coco_index, CocoIndex, load_coco_image_by_id
 from cityscapes_coco_anomaly.synthgen.sampler import build_sample_decision, make_rng_for_sample
-from cityscapes_coco_anomaly.synthgen.geometry import parse_geometry_cfg, compute_patch_geometry, apply_geometry_to_patch
+from cityscapes_coco_anomaly.synthgen.geometry import parse_geometry_cfg, compute_patch_geometry, \
+    apply_geometry_to_patch
 from cityscapes_coco_anomaly.synthgen.blending import parse_blending_cfg, blend_patch_into_image
 from cityscapes_coco_anomaly.synthgen.quality import parse_quality_cfg, sample_paste_location
 from cityscapes_coco_anomaly.synthgen.targets import TargetsConfig, merge_alphas_to_gt_and_instances
 from cityscapes_coco_anomaly.synthgen.export import export_sample, append_manifest_line
+
+# ANSI colors for logs
+C_RESET = "\033[0m"
+C_BOLD = "\033[1m"
+C_DIM = "\033[2m"
+C_RED = "\033[31m"
+C_GREEN = "\033[32m"
+C_YELLOW = "\033[33m"
+C_BLUE = "\033[34m"
+C_CYAN = "\033[36m"
 
 
 def extract_coco_patch_rgb_alpha(coco_index: CocoIndex, coco_images_dir: Path, inst) -> tuple[np.ndarray, np.ndarray]:
@@ -45,33 +56,14 @@ def extract_coco_patch_rgb_alpha(coco_index: CocoIndex, coco_images_dir: Path, i
     return patch_rgb, alpha
 
 
-def build_split(cfg: AppConfig, split: str):
-    print(f"Building dataset for split {split}...")
+def build_split(cfg: AppConfig, split: str, coco_index: CocoIndex):
+    print(f"{C_BOLD}{C_CYAN}Building dataset for split `{split}`...{C_RESET}")
 
     # indexes
     cs_index = build_cityscapes_index(cfg.paths_cityscapes, split)
 
     syn = cfg.synthesis
     export_cfg = cfg.export
-
-    # build coco pool
-    coco_cfg = syn.get("coco", {})
-
-    allowed_categories = coco_cfg.get("allowed_categories", [])
-    if not isinstance(allowed_categories, list) or len(allowed_categories) == 0:
-        raise ValueError("synthesis.coco.allowed_categories must be a non-empty list")
-
-    instance_filters = coco_cfg.get("instance_filters", {})
-    if not isinstance(instance_filters, dict):
-        instance_filters = {}
-
-    t0 = time.perf_counter()
-    coco_index = build_coco_index(
-        coco_instances_json=cfg.paths_coco.instances_train_json,
-        allowed_categories=[str(x) for x in allowed_categories],
-        instance_filters=instance_filters)
-
-    print(f"COCO pool size: {len(coco_index.pool)} (built in {time.time() - t0:.1f}s)")
 
     # configs for modules
     geo_cfg = parse_geometry_cfg(syn)
@@ -86,7 +78,7 @@ def build_split(cfg: AppConfig, split: str):
     tcfg = TargetsConfig(
         normal_pixel_value=int(values.get("normal", 0)),
         anomaly_pixel_value=int(values.get("anomaly", 1)),
-        ignore_pixel_value=int(values.get("ignore", 0)))
+        ignore_pixel_value=int(values.get("ignore", 255)))
 
     n_total = 0
     n_synth = 0
@@ -226,9 +218,13 @@ def build_split(cfg: AppConfig, split: str):
 
         if n_total % 200 == 0:
             print(
-                f"[{split}] {n_total} processed | synth {n_synth} | anomalous {n_anom} | failed placements {n_failed}")
+                f"{C_DIM}{C_CYAN}[{split}]{C_RESET} {n_total:>5d} processed | "
+                f"{C_YELLOW}synth{C_RESET} {n_synth:>5d} | "
+                f"{C_RED}anomalous{C_RESET} {n_anom:>5d} | "
+                f"failed placements {n_failed:>5d}")
 
-    print(f"Done {split}: total={n_total}, synth={n_synth}, anomalous={n_anom}, failed placements={n_failed}")
+    print(f"{C_BOLD}{C_GREEN}Done {split}:{C_RESET} total={n_total:>5d}, "
+          f"synth={n_synth:>5d}, anomalous={n_anom:>5d}, failed placements={n_failed:>5d}")
 
 
 def main():
@@ -263,9 +259,32 @@ def main():
     # Ensure output root exists
     cfg.dataset.output_root.mkdir(parents=True, exist_ok=True)
 
+    # build coco pool
+    coco_cfg = cfg.synthesis.get("coco", {})
+
+    allowed_categories = coco_cfg.get("allowed_categories", [])
+    if not isinstance(allowed_categories, list) or len(allowed_categories) == 0:
+        raise ValueError("synthesis.coco.allowed_categories must be a non-empty list")
+
+    instance_filters = coco_cfg.get("instance_filters", {})
+    if not isinstance(instance_filters, dict):
+        instance_filters = {}
+
+    t0 = time.perf_counter()
+    coco_index = build_coco_index(
+        coco_instances_json=cfg.paths_coco.instances_train_json,
+        allowed_categories=[str(x) for x in allowed_categories],
+        instance_filters=instance_filters)
+
+    if (dt := time.perf_counter() - t0) < 60:
+        print(f"{C_BOLD}{C_BLUE}COCO pool size:{C_RESET} {len(coco_index.pool)} (built in {dt:.1f}s)")
+    else:
+        mins, secs = divmod(dt, 60.0)
+        print(f"{C_BOLD}{C_BLUE}COCO pool size:{C_RESET} {len(coco_index.pool)} (built in {int(mins)}m {secs:.1f}s)")
+
     splits = [s.strip() for s in args.splits.split(",") if s.strip()]
     for s in splits:
-        build_split(cfg, s)
+        build_split(cfg, s, coco_index)
 
 
 if __name__ == "__main__":
