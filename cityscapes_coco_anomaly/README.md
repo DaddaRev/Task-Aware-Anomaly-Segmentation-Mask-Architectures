@@ -121,6 +121,47 @@ The manifest enables traceability, debugging, and post-hoc dataset analysis.
 
 ---
 
+### Configuration File (YAML)
+
+Dataset generation is fully controlled through a YAML configuration file (e.g. `synth_dataset_v1.yaml`).
+
+The configuration specifies:
+- dataset metadata (name, global seed, output directory),
+- paths to raw Cityscapes and COCO datasets and optional download settings,
+- dataset split behavior (clean vs synthetic ratios for train, validation, and test),
+- synthesis parameters, including:
+  - probability of inserting anomalies,
+  - number of instances per image and retry limits,
+  - allowed COCO categories and instance-level quality filters,
+  - target Cityscapes semantic classes and forbidden overlaps,
+  - geometric scaling constraints,
+  - blending and photometric matching options,
+- export options and ground-truth conventions.
+
+The YAML file serves as the single source of truth for dataset generation and ensures that experiments are fully reproducible by configuration alone.
+
+---
+
+### Manifest File (JSONL)
+
+During dataset generation, a JSON Lines manifest file (`manifest.jsonl`) is created.
+Each line corresponds to one processed Cityscapes image and provides a complete
+record of how that sample was generated.
+
+For each image, the manifest stores:
+- dataset split and Cityscapes image identifier,
+- whether the image was selected for synthesis,
+- whether at least one anomaly was successfully placed,
+- the number of planned and placed anomaly instances,
+- the random seed used for the sample,
+- the semantic target labels used for placement,
+- the COCO annotation IDs of inserted objects,
+- relative paths to all exported outputs (image, pixel-level ground truth, instance masks, labels).
+
+The manifest enables traceability, debugging, dataset statistics analysis, and exact reconstruction of the generation process for any individual sample.
+
+---
+  
 ## Dataset Splits
 
 Dataset splits are defined in the configuration file using clean and synthetic
