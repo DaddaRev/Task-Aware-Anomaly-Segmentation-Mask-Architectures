@@ -175,11 +175,6 @@ def alpha_composite(bg_rgb: np.ndarray, patch_rgb: np.ndarray, alpha: np.ndarray
     bg = bg_rgb.astype(np.float32)
     fg = patch_rgb.astype(np.float32)
 
-    # # make alpha more solid
-    a **= 0.6
-    # increase interior alpha to avoid ghost-like objects
-    a = np.where(a > 0.35, 0.85, a)
-
     out = a * fg + (1.0 - a) * bg
     return np.clip(out, 0, 255).astype(np.uint8)
 

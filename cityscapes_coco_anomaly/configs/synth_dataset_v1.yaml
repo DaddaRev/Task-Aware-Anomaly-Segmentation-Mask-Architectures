@@ -63,7 +63,7 @@ synthesis:
   # quante istanze per immagine, se has_anomaly=True
   instances_per_image:
     min: 1
-    max: 2
+    max: 1
 
   # massimo tentativi per trovare una composizione valida (per immagine e per istanza)
   max_image_attempts: 10
@@ -138,8 +138,8 @@ synthesis:
     final_area_ratio_min: 0.01
     final_area_ratio_max: 0.18
 
-    # se true: random orizzontal flip
-    random_horizontal_flip: true
+    # se true: random horizontal flip
+    random_horizontal_flip: false
 
   blending:
     # feather bordo (px)
@@ -150,7 +150,7 @@ synthesis:
       enabled: true
       space: lab
       match_mean: true
-      match_std: true
+      match_std: false
       eps: 1.0e-6
 
     # alpha compositing
