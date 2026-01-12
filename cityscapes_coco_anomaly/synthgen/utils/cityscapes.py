@@ -53,10 +53,6 @@ def resolve_cityscapes_datadir(datadir: str) -> Path:
         out_gt = out_root / "gtFine"
         out_left = out_root / "leftImg8bit"
 
-        # # Refresh outputs to avoid mixing old/new data
-        # if out_gt.exists(): shutil.rmtree(out_gt)
-        # if out_left.exists(): shutil.rmtree(out_left)
-
         shutil.copytree(gt_dir, out_gt)
         shutil.copytree(left_dir, out_left)
 

@@ -2,7 +2,7 @@ import argparse
 from pathlib import Path
 from dataclasses import dataclass
 
-from .downloader import download_file, safe_extract_zip, require_exists
+from .downloader import download_file, extract_zip, require_exists
 
 COCO_TRAIN2017_URL = "http://images.cocodataset.org/zips/train2017.zip"
 COCO_ANN_TRAINVAL2017_URL = "http://images.cocodataset.org/annotations/annotations_trainval2017.zip"
@@ -37,7 +37,7 @@ def download_coco(root: str | Path, *, force: bool = False) -> CocoLayout:
     """
     Downloads:
       - train2017.zip -> extracts to <root>/train2017/
-      - annotations_trainval2017.zip -> extracts to <root>/annotations/ (includes instances_train2017.json)
+      - annotations_trainval2017.zip -> extracts to <root>/annotations/
     """
 
     root = Path(root)
@@ -56,11 +56,11 @@ def download_coco(root: str | Path, *, force: bool = False) -> CocoLayout:
 
     if not (layout.images_dir.exists() and any(layout.images_dir.glob("*.jpg"))):
         print(f"Extracting {layout.images_zip.name} -> {layout.root}")
-        safe_extract_zip(layout.images_zip, layout.root)
+        extract_zip(layout.images_zip, layout.root)
 
     if not layout.instances_json.exists():
         print(f"Extracting {layout.ann_zip.name} -> {layout.root}")
-        safe_extract_zip(layout.ann_zip, layout.root)
+        extract_zip(layout.ann_zip, layout.root)
 
     require_exists(layout.images_dir)
     if not any(layout.images_dir.glob("*.jpg")):

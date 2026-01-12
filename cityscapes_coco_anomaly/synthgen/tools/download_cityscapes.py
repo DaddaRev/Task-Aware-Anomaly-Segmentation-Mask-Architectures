@@ -1,13 +1,12 @@
-from pathlib import Path
-
 import requests
+from pathlib import Path
 
 from cityscapes_coco_anomaly.synthgen.tools.downloader import download_file
 
 
 def download_cityscapes(root: str | Path, *, force: bool = False) -> Path:
     """
-    Scarica i pacchetti Cityscapes (leftImg8bit e gtFine)
+    Download Cityscapes dataset (leftImg8bit e gtFine)
     """
     root = Path(root).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -16,8 +15,8 @@ def download_cityscapes(root: str | Path, *, force: bool = False) -> Path:
         print(f"Cityscapes appears present at: {root}")
         return root
 
-    # si, bisognerebbe usare le variabili d'ambiente, file .env, os.getenv e non hardcodare user e pwd,
-    # ma va bene lo stesso.
+    # Yes, I should use environment variables, .env files, os.getenv, and not hardcode user and pwd,
+    # but it's fine anyway.
     user = "AdryG"
     pwd = "Agf2gc262!"
 

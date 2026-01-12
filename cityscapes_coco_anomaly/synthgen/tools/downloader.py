@@ -1,9 +1,8 @@
 import zipfile
-from pathlib import Path
-from typing import Optional
-
 import requests
 from tqdm import tqdm
+from pathlib import Path
+from typing import Optional
 
 
 def require_exists(p: Path, what: str = "path") -> None:
@@ -51,7 +50,7 @@ def download_file(
     return dst
 
 
-def safe_extract_zip(zip_path: Path, extract_to: Path) -> None:
+def extract_zip(zip_path: Path, extract_to: Path) -> None:
     extract_to.mkdir(parents=True, exist_ok=True)
 
     with zipfile.ZipFile(zip_path, "r") as zf:
