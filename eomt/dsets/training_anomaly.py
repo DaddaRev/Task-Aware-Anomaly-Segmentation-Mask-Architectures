@@ -132,7 +132,7 @@ class GenericAnomalyDataset(LightningDataModule):
             self,
             datasets: list,
             img_size: tuple[int, int] = (1024, 1024),
-            batch_size: int = 4,
+            batch_size: int = 1,
             num_workers: int = 4,
             path: str = "",
             num_classes: int = 19,
@@ -161,7 +161,8 @@ class GenericAnomalyDataset(LightningDataModule):
             num_workers=self.num_workers,
             shuffle=True,
             pin_memory=True,
-            drop_last=True
+            drop_last=True,
+            persistent_workers=self.num_workers > 0
         )
 
     def val_dataloader(self):
@@ -170,7 +171,8 @@ class GenericAnomalyDataset(LightningDataModule):
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             shuffle=False,
-            pin_memory=True
+            pin_memory=True,
+            persistent_workers=self.num_workers > 0
         )
 
     def test_dataloader(self):
@@ -179,5 +181,6 @@ class GenericAnomalyDataset(LightningDataModule):
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             shuffle=False,
-            pin_memory=True
+            pin_memory=True,
+            persistent_workers=self.num_workers > 0
         )
