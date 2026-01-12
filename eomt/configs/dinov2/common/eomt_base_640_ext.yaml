@@ -10,15 +10,17 @@ model:
   class_path: training.mask_classification_semantic_anomaly.MCS_Anomaly
   init_args:
     num_classes: 2
-    attn_mask_annealing_enabled: True
-    attn_mask_annealing_start_steps: [ 3317, 8292, 13268 ]
-    attn_mask_annealing_end_steps: [ 6634, 11609, 16585 ]
+    attn_mask_annealing_enabled: False
+    # Steps removed as they were out of range for short training
+    # attn_mask_annealing_start_steps: ...
+    # attn_mask_annealing_end_steps: ...
 
     network:
       class_path: models.eomt_ext.EoMT_EXT
       init_args:
         num_classes: 19
         num_q: 100
+        masked_attn_enabled: False # Force Global Attention to find anomalies
         num_blocks: 3
         encoder:
           class_path: models.vit.ViT

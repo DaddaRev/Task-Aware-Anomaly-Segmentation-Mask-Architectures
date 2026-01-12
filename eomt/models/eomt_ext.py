@@ -38,7 +38,8 @@ class EoMT_EXT(nn.Module):
         self.class_head = nn.Linear(self.encoder.backbone.embed_dim, num_classes + 1)
 
         # anomaly_head receives: [query_emb (C)] + [entropy (1)] + [max_prob (1)]
-        self.anomaly_head = nn.Linear(self.encoder.backbone.embed_dim + 2, 3) #bg, anomaly, void
+        # Output: 2 logits -> [Anomaly, No Object]
+        self.anomaly_head = nn.Linear(self.encoder.backbone.embed_dim + 2, 2)
 
         self.mask_head = nn.Sequential(
             nn.Linear(self.encoder.backbone.embed_dim, self.encoder.backbone.embed_dim),

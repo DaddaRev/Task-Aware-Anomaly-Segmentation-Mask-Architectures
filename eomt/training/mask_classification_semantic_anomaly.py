@@ -40,8 +40,8 @@ class MCS_Anomaly(MaskClassificationSemantic):
             **kwargs
     ):
 
-        no_object_coefficient = 0.1
-        bg_coefficient = 2.0
+        no_object_coefficient = 1.0
+        bg_coefficient = 1.0
 
         super().__init__(
             network=network,
@@ -80,7 +80,7 @@ class MCS_Anomaly(MaskClassificationSemantic):
             mask_coefficient=mask_coefficient,
             dice_coefficient=dice_coefficient,
             class_coefficient=class_coefficient,
-            num_labels=2,
+            num_labels=1, # 1 Foreground Class (Anomaly at index 0) + 1 Background (Implicit at index 1)
             no_object_coefficient=no_object_coefficient,
             bg_coefficient=bg_coefficient,
         )
@@ -126,6 +126,19 @@ class MCS_Anomaly(MaskClassificationSemantic):
         imgs, targets = batch
         targets = self._unstack_targets(imgs, targets)
 
+        # --- Target Formatting for 2-Logit Head (Anomaly vs NoObject) ---
+        # 1. We only supervise Anomaly objects. Normality is "No Object".
+        # 2. We remap Global Label 1 (Anomaly) -> Local Label 0.
+        #    Why? Because the head predicts [Anomaly, NoObject]. The Loss expects positive classes to start at 0.
+        targets_for_loss = []
+        for t in targets:
+            keep = t["labels"] == 1  # Only keep Anomaly
+            new_labels = torch.zeros_like(t["labels"][keep]) # Remap to 0
+            targets_for_loss.append({
+                "masks": t["masks"][keep],
+                "labels": new_labels
+            })
+
         mask_logits_per_block, class_logits_per_block, anomaly_logits_per_block = self(imgs)
 
         losses_all_blocks = {}
@@ -135,7 +148,7 @@ class MCS_Anomaly(MaskClassificationSemantic):
             losses = self.criterion_anomalymask(
                 masks_queries_logits=mask_logits,
                 class_queries_logits=anomaly_logits,
-                targets=targets,
+                targets=targets_for_loss,
             )
             block_postfix = self.block_postfix(i)
             losses = {f"{key}{block_postfix}": value for key, value in losses.items()}
@@ -160,12 +173,11 @@ class MCS_Anomaly(MaskClassificationSemantic):
             probs_anomaly = anomaly_logits.softmax(dim=-1)
 
             # --- We construct a 2-class probability distribution [B, Q, 2] ---
-            # Class 0 (Normal) = Sum of Background(0) + Void(2)
-            # Class 1 (Anomaly) = Anomaly(1)
-            # This matches the binary target "Normal vs Anomaly" we use for metrics
+            # anomaly_head output is now 2 dim: [Anomaly, No Object]
+            # We want downstream: Channel 0 = Normal/Void, Channel 1 = Anomaly
             valid_probs = torch.stack([
-                probs_anomaly[..., 0] + probs_anomaly[..., 2],  # Normal
-                probs_anomaly[..., 1]                           # Anomaly
+                probs_anomaly[..., 1],  # Normal/Void (was "No Object")
+                probs_anomaly[..., 0]   # Anomaly
             ], dim=-1)
 
             mask_logits = F.interpolate(mask_logits, self.img_size, mode="bilinear")
