@@ -132,6 +132,7 @@ class MCS_Anomaly(MaskClassificationSemantic):
         #    Why? Because the head predicts [Anomaly, NoObject]. The Loss expects positive classes to start at 0.
         targets_for_loss = []
         for t in targets:
+            print(t)
             keep = t["labels"] == 1  # Only keep Anomaly
             new_labels = torch.zeros_like(t["labels"][keep]) # Remap to 0
             targets_for_loss.append({
@@ -216,12 +217,9 @@ class MCS_Anomaly(MaskClassificationSemantic):
         img_vis = torch.clamp(img_vis, 0, 1).cpu()
 
         # 2. Predizione (Probabilità)
-        # logits shape: [NumClasses(3 o 2), H, W]. Indice 1 = Anomalia.
-        # Applichiamo Softmax per avere probabilità valide 0..1
-        #print(logits.shape)  #2x1024x1024
-        sum_scores = logits.sum(dim=0, keepdim=True) + 1e-6
-        probs = (logits / sum_scores).cpu()
-        prob_vis = probs[1] #anomaly probs
+        # logits are just of anomaly class
+        prob_vis = F.softmax(logits) #anomaly probs
+        print(prob_vis)
         pred_vis = prob_vis.unsqueeze(0).repeat(3, 1, 1)
         pred_vis = torch.clamp(pred_vis, 0, 1)
 
