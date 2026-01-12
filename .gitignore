@@ -1,3 +1,4 @@
+cityscapes_coco_anomaly/data
 eval/cityscapes
 eval/results_erfnet
 eval/validation_datasets

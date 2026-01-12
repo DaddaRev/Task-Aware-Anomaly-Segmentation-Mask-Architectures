@@ -117,3 +117,5 @@ wcwidth==0.2.14
 widgetsnbextension==4.0.15
 yacs==0.1.8
 yarl==1.22.0
+
+opencv-python

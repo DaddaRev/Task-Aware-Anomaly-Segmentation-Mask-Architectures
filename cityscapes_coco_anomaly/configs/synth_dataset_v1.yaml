@@ -1,0 +1,180 @@
+dataset:
+  name: cs_coco_anom_v1
+  seed: 32323232 # il voto che mi aspetto, per ognuno del team
+  output_root: ../data/synth/cs_coco_anom_v1
+
+datasets:
+  cityscapes:
+    root: ../data/raw/cityscapes
+
+    download:
+      enabled: true
+
+    images:
+      train: leftImg8bit/train
+      val: leftImg8bit/val
+      test: leftImg8bit/test
+
+    semantics:
+      train: gtFine/train
+      val: gtFine/val
+      test: gtFine/test
+
+  coco:
+    root: ../data/raw/coco
+
+    download:
+      enabled: true
+
+      images:
+        train:
+          url: http://images.cocodataset.org/zips/train2017.zip
+          archive: train2017.zip
+          extract_dir: train2017
+
+      annotations:
+        instances_train:
+          url: http://images.cocodataset.org/annotations/annotations_trainval2017.zip
+          archive: annotations_trainval2017.zip
+          extract_dir: annotations
+          file: annotations/instances_train2017.json
+
+    images:
+      train: train2017
+
+    annotations:
+      instances_train: annotations/instances_train2017.json
+
+splits:
+  train:
+    clean_ratio: 0.50
+    synth_ratio: 0.50
+  val:
+    clean_ratio: 1.00
+    synth_ratio: 0.00
+  test:
+    clean_ratio: 0.00
+    synth_ratio: 1.00
+
+synthesis:
+  # percentuale di immagini sintetiche che contengono almeno 1 anomalia
+  p_has_anomaly: 0.70
+
+  # quante istanze per immagine, se has_anomaly=True
+  instances_per_image:
+    min: 1
+    max: 1
+
+  # massimo tentativi per trovare una composizione valida (per immagine e per istanza)
+  max_image_attempts: 10
+  max_instance_attempts: 30
+  max_location_attempts: 50
+
+  coco:
+    # categorie COCO ammesse come anomalie
+    allowed_categories:
+      # animals
+      - dog
+      - cat
+      - horse
+      - cow
+      - sheep
+      - bear
+      - zebra
+      - giraffe
+      # furniture
+      - chair
+      - couch
+      - bed
+      - dining table
+      # appliances
+      - microwave
+      - refrigerator
+      - toaster
+      # food
+      - banana
+      - apple
+      - sandwich
+
+    # filtri qualità istanza
+    instance_filters:
+      # bbox interamente dentro l'immagine COCO
+      require_fully_visible: true
+      # rapporto w/h (evita maschere troppo sottili)
+      aspect_ratio_min: 0.30
+      aspect_ratio_max: 3.00
+      # area istanza rispetto all'immagine COCO (oggetti troppo piccoli/grandi)
+      area_ratio_min: 0.002
+      area_ratio_max: 0.20
+      # maschera non deve essere troppo sparsa: area(mask) / area(convex_hull)
+      min_solidity: 0.20
+
+  cityscapes:
+    # target di inserimento: (label, peso)
+    target_labels:
+      - [road, 0.70]
+      - [sidewalk, 0.30]
+
+    # labels da evitare in sovrapposizione
+    forbidden_overlap_labels:
+      - person
+      - rider
+      - car
+      - truck
+      - bus
+      - train
+      - motorcycle
+      - bicycle
+
+    # quanto l'oggetto deve stare sopra la classe scelta
+    min_target_label_coverage: 0.80
+
+  geometry:
+    # scaling prospettico in base a y
+    scale_min: 0.35
+    scale_max: 1.25
+
+    # area finale (dopo scaling) rispetto all'immagine Cityscapes
+    final_area_ratio_min: 0.01
+    final_area_ratio_max: 0.18
+
+    # se true: random horizontal flip
+    random_horizontal_flip: false
+
+  blending:
+    # feather bordo (px)
+    feather_px: 4
+
+    # photometric matching locale
+    photometric_match:
+      enabled: true
+      space: lab
+      match_mean: true
+      match_std: false
+      eps: 1.0e-6
+
+    # alpha compositing
+    # out = alpha * patch + (1-alpha) * bg
+    alpha_composite: true
+
+  quality_filters:
+    # scarta se bbox finale tocca il bordo dell'immagine cityscapes
+    reject_if_touches_image_border: true
+
+export:
+  image_format: png
+  gt_pixel:
+    enabled: true
+    values:
+      normal: 0
+      anomaly: 1
+      ignore: 255
+  masks:
+    enabled: true
+    format: npy  # lista maschere boolean HxW
+  labels:
+    enabled: true
+    format: npy  # lista int
+  manifest:
+    enabled: true
+    filename: manifest.jsonl
