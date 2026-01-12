@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
+from typing import Any
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
 
 
 @dataclass(frozen=True)
@@ -24,7 +24,7 @@ class PatchGeom:
     out_w: int
 
 
-def parse_geometry_cfg(synthesis_cfg: Dict[str, Any]) -> GeometryConfig:
+def parse_geometry_cfg(synthesis_cfg: dict[str, Any]) -> GeometryConfig:
     geo = synthesis_cfg.get("geometry", {})
 
     scale_min = float(geo.get("scale_min", 1.0))

@@ -1,6 +1,6 @@
 import numpy as np
+from typing import Any, Optional
 from dataclasses import dataclass
-from typing import Any, Optional, Sequence
 
 
 @dataclass(frozen=True)
@@ -57,10 +57,10 @@ def target_label_coverage_ok(
     return cov >= min_cov
 
 
-def forbidden_overlap_ok(
-        sem_trainids: np.ndarray,
-        x: int, y: int, w: int, h: int,
-        forbidden_ids: set[int]) -> bool:
+def forbidden_overlap_ok(sem_trainids: np.ndarray,
+                         x: int, y: int, w: int, h: int,
+                         forbidden_ids: set[int]) -> bool:
+
     if not forbidden_ids:
         return True
     patch = sem_trainids[y:y + h, x:x + w]

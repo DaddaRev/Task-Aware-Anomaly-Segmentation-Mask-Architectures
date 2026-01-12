@@ -12,7 +12,7 @@ class TargetsConfig:
         1 = anomaly
         255 = ignore
 
-    - mask-based targets (EOMT-style):
+    - mask-based targets:
         masks: list of HxW bool
         labels: list of ints (we use 0 as the single anomaly class)
     """
@@ -82,7 +82,6 @@ def add_instance_target_from_alpha(
 
     m = (alpha_full > 0.5)
     if np.count_nonzero(m) == 0:
-        # if nothing was pasted (or feather too aggressive), skip
         return
 
     masks.append(m)

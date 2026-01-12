@@ -1,8 +1,8 @@
 import cv2
 import json
 import numpy as np
+from typing import Any
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
 from .utils.io import ensure_split_output_dirs
 
@@ -23,14 +23,14 @@ def write_gt_pixel_png(path: Path, gt_pixel: np.ndarray):
         raise IOError(f"Failed to write gt_pixel: {path}")
 
 
-def write_masks_npy(mask_paths: List[Path], masks: List[np.ndarray]):
+def write_masks_npy(mask_paths: list[Path], masks: list[np.ndarray]):
     for p, m in zip(mask_paths, masks):
         if m.dtype != np.bool_ or m.ndim != 2:
             raise ValueError("each mask must be bool HxW")
         np.save(str(p), m, allow_pickle=False)
 
 
-def write_labels_npy(path: Path, labels: List[int]):
+def write_labels_npy(path: Path, labels: list[int]):
     arr = np.asarray(labels, dtype=np.int64)
     np.save(str(path), arr, allow_pickle=False)
 
@@ -41,9 +41,9 @@ def export_sample(
         sample_id: str,
         rgb: np.ndarray,
         gt_pixel: np.ndarray,
-        masks: List[np.ndarray],
-        labels: List[int],
-        export_cfg: Dict[str, Any]) -> Dict[str, object]:
+        masks: list[np.ndarray],
+        labels: list[int],
+        export_cfg: dict[str, Any]) -> dict[str, object]:
     """
     export:
       image_format: png
@@ -72,7 +72,7 @@ def export_sample(
 
     dirs = ensure_split_output_dirs(output_root, split)
 
-    out: Dict[str, object] = {}
+    out: dict[str, object] = {}
     img_path = dirs["images"] / f"{sample_id}.png"
     write_rgb_png(img_path, rgb)
     out["image"] = str(img_path.relative_to(output_root))
@@ -85,8 +85,8 @@ def export_sample(
 
     #  masks 
     if masks_enabled:
-        mask_paths: List[Path] = []
-        mask_relpaths: List[str] = []
+        mask_paths: list[Path] = []
+        mask_relpaths: list[str] = []
         for i in range(len(masks)):
             mp = dirs["masks"] / f"{sample_id}_{i:02d}.npy"
             mask_paths.append(mp)
@@ -105,8 +105,8 @@ def export_sample(
 
 def append_manifest_line(
         output_root: Path,
-        record: Dict[str, Any],
-        export_cfg: Dict[str, Any]):
+        record: dict[str, Any],
+        export_cfg: dict[str, Any]):
     """
     Append one JSON record to manifest if enabled
     """

@@ -1,6 +1,6 @@
 import yaml
+from typing import Any
 from pathlib import Path
-from typing import Any, Optional
 from dataclasses import dataclass
 
 from cityscapes_coco_anomaly.synthgen.utils import (CityscapesPaths,

@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
+from typing import Any
 from dataclasses import dataclass
-from typing import Any, Optional
 
 
 @dataclass(frozen=True)
@@ -209,7 +209,6 @@ def blend_patch_into_image(
     bg_region = city_rgb[y:y + ph, x:x + pw]
     patch_matched = photometric_match_patch(patch_rgb, bg_region, cfg.photometric)
 
-    # composite
     if cfg.alpha_composite:
         blended_region = alpha_composite(bg_region, patch_matched, a)
     else:

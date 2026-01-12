@@ -1,5 +1,5 @@
 import numpy as np
-from typing import Any, Optional
+from typing import Any
 
 from cityscapes_coco_anomaly.synthgen.config import AppConfig
 from cityscapes_coco_anomaly.synthgen.utils.io import derive_sample_seed
@@ -93,11 +93,10 @@ def sample_coco_instance(rng: np.random.Generator, coco_index: CocoIndex) -> Coc
 
 
 def build_sample_decision(
-    cfg: AppConfig,
-    split: str,
-    city_id: str,
-    coco_index: CocoIndex) -> SampleDecision:
-
+        cfg: AppConfig,
+        split: str,
+        city_id: str,
+        coco_index: CocoIndex) -> SampleDecision:
     """
      Returns a fully deterministic 'plan' for this Cityscapes sample:
      - whether synth or clean
@@ -162,4 +161,3 @@ def build_sample_decision(
         target_labels=tuple(tlabels),
         coco_instances=tuple(coco_insts),
         seed=seed)
-

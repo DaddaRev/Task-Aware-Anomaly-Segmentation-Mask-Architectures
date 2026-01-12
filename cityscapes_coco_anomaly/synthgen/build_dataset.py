@@ -9,8 +9,9 @@ from cityscapes_coco_anomaly.synthgen.utils.coco import decode_coco_segmentation
 from cityscapes_coco_anomaly.synthgen.cityscapes_index import build_cityscapes_index, iter_cityscapes_pairs
 from cityscapes_coco_anomaly.synthgen.coco_index import build_coco_index, CocoIndex, load_coco_image_by_id
 from cityscapes_coco_anomaly.synthgen.sampler import build_sample_decision, make_rng_for_sample
-from cityscapes_coco_anomaly.synthgen.geometry import parse_geometry_cfg, compute_patch_geometry, \
-    apply_geometry_to_patch
+from cityscapes_coco_anomaly.synthgen.geometry import (parse_geometry_cfg,
+                                                       compute_patch_geometry,
+                                                       apply_geometry_to_patch)
 from cityscapes_coco_anomaly.synthgen.blending import parse_blending_cfg, blend_patch_into_image
 from cityscapes_coco_anomaly.synthgen.quality import parse_quality_cfg, sample_paste_location
 from cityscapes_coco_anomaly.synthgen.targets import TargetsConfig, merge_alphas_to_gt_and_instances
