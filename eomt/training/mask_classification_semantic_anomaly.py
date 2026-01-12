@@ -155,23 +155,26 @@ class MCS_Anomaly(MaskClassificationSemantic):
         for i, (mask_logits, class_logits, anomaly_logits) in enumerate(
                 list(zip(mask_logits_per_layer, class_logits_per_layer, anomaly_logits_per_layer))
         ):
-            # probs_anomaly = anomaly_logits.softmax(dim=-1)
-            #
-            # # --- FIX LOGICA CLASSI (Sfondo+Void=0, Anomalia=1) ---
-            # valid_probs = torch.stack([
-            #     probs_anomaly[..., 0] + probs_anomaly[..., 2],  # Canale 0: Normal (Bg + Void)
-            #     probs_anomaly[..., 1]  # Canale 1: Anomaly
-            # ], dim=-1)
+            probs_anomaly = anomaly_logits.softmax(dim=-1)
+
+            # --- We construct a 2-class probability distribution [B, Q, 2] ---
+            # Class 0 (Normal) = Sum of Background(0) + Void(2)
+            # Class 1 (Anomaly) = Anomaly(1)
+            # This matches the binary target "Normal vs Anomaly" we use for metrics
+            valid_probs = torch.stack([
+                probs_anomaly[..., 0] + probs_anomaly[..., 2],  # Normal
+                probs_anomaly[..., 1]                           # Anomaly
+            ], dim=-1)
 
             mask_logits = F.interpolate(mask_logits, self.img_size, mode="bilinear")
 
-            # # Einsum corretto: [B, Q, H, W] * [B, Q, C] -> [B, C, H, W]
-            # crop_logits = torch.einsum(
-            #     "bqhw, bqc -> bchw",
-            #     mask_logits.sigmoid(),
-            #     valid_probs
-            # )
-            crop_logits = self.to_per_pixel_logits_semantic(mask_logits, anomaly_logits)
+            # Explicitly combine Mask Probs (sigmoid) with Class Probs using Einsum
+            # [B, Q, H, W] x [B, Q, 2] -> [B, 2, H, W]
+            crop_logits = torch.einsum(
+                "bqhw, bqc -> bchw",
+                mask_logits.sigmoid(),
+                valid_probs
+            )
 
             logits = self.revert_window_logits_semantic(crop_logits, origins, img_sizes)
 
