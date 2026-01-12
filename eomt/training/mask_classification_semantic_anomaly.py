@@ -99,10 +99,12 @@ class MCS_Anomaly(MaskClassificationSemantic):
             for param in self.network.anomaly_head.parameters():
                 param.requires_grad = True
 
-        if hasattr(self.network, 'mask_head'):
-            print("Unfreezing mask_head params...")
-            for param in self.network.mask_head.parameters():
-                param.requires_grad = True
+        # --- Balanced Strategy ---
+        # Keep mask_head/upscale frozen to preserve semantic performance.
+        # But unfreeze 'q' so queries can adapt to find anomalies.
+        if hasattr(self.network, 'q'):
+            print("Unfreezing query embeddings...")
+            self.network.q.weight.requires_grad = True
 
     def _preprocess_images(self, imgs):
         if imgs.dtype == torch.uint8:
@@ -139,7 +141,7 @@ class MCS_Anomaly(MaskClassificationSemantic):
             losses = {f"{key}{block_postfix}": value for key, value in losses.items()}
             losses_all_blocks |= losses
 
-        return self.criterion.loss_total(losses_all_blocks, self.log)
+        return self.criterion_anomalymask.loss_total(losses_all_blocks, self.log)
 
     def eval_step(self, batch, batch_idx=None, log_prefix=None):
         imgs, targets = batch
