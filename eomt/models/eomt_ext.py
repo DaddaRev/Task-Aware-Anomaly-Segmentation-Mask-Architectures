@@ -37,10 +37,9 @@ class EoMT_EXT(nn.Module):
 
         self.class_head = nn.Linear(self.encoder.backbone.embed_dim, num_classes + 1)
 
-        # NORMALITY HEAD: Predicts [Normal_Object, No_Object]
+        # NORMALITY HEAD: Predicts [Normal, Anomaly, No_Object]
         # Input: [query_emb (C)] + [entropy (1)] + [max_prob (1)]
-        # Anomaly detection via inversion: anomaly = 1 - normality
-        self.normality_head = nn.Linear(self.encoder.backbone.embed_dim + 2, 2)
+        self.normality_head = nn.Linear(self.encoder.backbone.embed_dim + 2, 3)
 
         self.mask_head = nn.Sequential(
             nn.Linear(self.encoder.backbone.embed_dim, self.encoder.backbone.embed_dim),

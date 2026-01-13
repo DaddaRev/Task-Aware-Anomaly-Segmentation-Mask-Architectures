@@ -80,7 +80,7 @@ class MCS_Anomaly(MaskClassificationSemantic):
             mask_coefficient=mask_coefficient,
             dice_coefficient=dice_coefficient,
             class_coefficient=class_coefficient,
-            num_labels=1, # 1 Foreground Class (Anomaly at index 0) + 1 Background (Implicit at index 1)
+            num_labels=2, # Normal (0), Anomaly (1) + NoObject (2)
             no_object_coefficient=no_object_coefficient,
             bg_coefficient=bg_coefficient,
         )
@@ -127,19 +127,17 @@ class MCS_Anomaly(MaskClassificationSemantic):
         imgs, targets = batch
         targets = self._unstack_targets(imgs, targets)
 
-        # --- NORMALITY HEAD PARADIGM ---
-        # Train on BOTH label 0 (background/road) AND label 255 (void/cars/trees/buildings)
-        # These are ALL "normal" objects (known from Cityscapes pretraining)
-        # Label 1 (anomaly) is NOT supervised → emerges by exclusion
-        # The head predicts [Normal, NoObject]
+        # --- UPDATED PARADIGM ---
+        # Class 0: Normal (Road, etc)
+        # Class 1: Anomaly (Explicit supervision on anomalies)
+        # Class 255: Void -> Map to No-Object (Implicitly ignored by not including in targets)
         targets_for_loss = []
         for t in targets:
-            # Keep BOTH background (0) and void (255) as "Normal"
-            keep = (t["labels"] == 0) | (t["labels"] == 255)
-            new_labels = torch.zeros_like(t["labels"][keep])  # Remap both to 0 (Normal class)
+            # Keep Normal(0) and Anomaly(1). Ignore Void(255).
+            keep = (t["labels"] == 0) | (t["labels"] == 1)
             targets_for_loss.append({
                 "masks": t["masks"][keep],
-                "labels": new_labels
+                "labels": t["labels"][keep] # Labels are already 0 and 1
             })
 
         mask_logits_per_block, class_logits_per_block, normality_logits_per_block = self(imgs)
@@ -175,14 +173,10 @@ class MCS_Anomaly(MaskClassificationSemantic):
         ):
             probs_normality = normality_logits.softmax(dim=-1)
 
-            # --- NORMALITY HEAD INVERSION ---
-            # normality_head output: [Normal, NoObject]
-            # We want: Channel 0 = Background/Normal, Channel 1 = Anomaly
-            # Inversion: anomaly_prob = 1 - normal_prob
-            valid_probs = torch.stack([
-                probs_normality[..., 0],      # Normal (keep as is)
-                1.0 - probs_normality[..., 0] # Anomaly (inverted from normal)
-            ], dim=-1)
+            # --- NORMALITY HEAD DIRECT PREDICTION ---
+            # normality_head output: [Normal, Anomaly, NoObject]
+            # We want: Channel 0 = Normal, Channel 1 = Anomaly
+            valid_probs = probs_normality[..., :2]
 
             mask_logits = F.interpolate(mask_logits, self.img_size, mode="bilinear")
 
