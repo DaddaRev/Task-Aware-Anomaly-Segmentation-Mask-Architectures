@@ -94,10 +94,10 @@ class MCS_Anomaly(MaskClassificationSemantic):
         for param in self.network.parameters():
             param.requires_grad = False
 
-        # Unfreeze NORMALITY HEAD (trainable)
-        if hasattr(self.network, 'normality_head'):
-            print("Unfreezing normality_head params...")
-            for param in self.network.normality_head.parameters():
+        # Unfreeze ANOMALY HEAD (trainable)
+        if hasattr(self.network, 'anomaly_head'):
+            print("Unfreezing anomaly_head params...")
+            for param in self.network.anomaly_head.parameters():
                 param.requires_grad = True
 
         # --- Balanced Strategy ---
@@ -140,15 +140,15 @@ class MCS_Anomaly(MaskClassificationSemantic):
                 "labels": t["labels"][keep] # Labels are already 0 and 1
             })
 
-        mask_logits_per_block, class_logits_per_block, normality_logits_per_block = self(imgs)
+        mask_logits_per_block, class_logits_per_block, anomaly_logits_per_block = self(imgs)
 
         losses_all_blocks = {}
-        for i, (mask_logits, class_logits, normality_logits) in enumerate(
-                list(zip(mask_logits_per_block, class_logits_per_block, normality_logits_per_block))
+        for i, (mask_logits, class_logits, anomaly_logits) in enumerate(
+                list(zip(mask_logits_per_block, class_logits_per_block, anomaly_logits_per_block))
         ):
             losses = self.criterion_anomalymask(
                 masks_queries_logits=mask_logits,
-                class_queries_logits=normality_logits,
+                class_queries_logits=anomaly_logits,
                 targets=targets_for_loss,
             )
             block_postfix = self.block_postfix(i)
@@ -164,19 +164,19 @@ class MCS_Anomaly(MaskClassificationSemantic):
 
         crops, origins = self.window_imgs_semantic(imgs)
 
-        mask_logits_per_layer, class_logits_per_layer, normality_logits_per_layer = self(crops)
+        mask_logits_per_layer, class_logits_per_layer, anomaly_logits_per_layer = self(crops)
 
         targets = self.to_per_pixel_targets_semantic(targets, self.ignore_idx)
 
-        for i, (mask_logits, class_logits, normality_logits) in enumerate(
-                list(zip(mask_logits_per_layer, class_logits_per_layer, normality_logits_per_layer))
+        for i, (mask_logits, class_logits, anomaly_logits) in enumerate(
+                list(zip(mask_logits_per_layer, class_logits_per_layer, anomaly_logits_per_layer))
         ):
-            probs_normality = normality_logits.softmax(dim=-1)
+            probs_anomaly = anomaly_logits.softmax(dim=-1)
 
-            # --- NORMALITY HEAD DIRECT PREDICTION ---
-            # normality_head output: [Normal, Anomaly, NoObject]
+            # --- ANOMALY HEAD DIRECT PREDICTION ---
+            # anomaly_head output: [Normal, Anomaly, NoObject]
             # We want: Channel 0 = Normal, Channel 1 = Anomaly
-            valid_probs = probs_normality[..., :2]
+            valid_probs = probs_anomaly[..., :2]
 
             mask_logits = F.interpolate(mask_logits, self.img_size, mode="bilinear")
 
@@ -223,7 +223,7 @@ class MCS_Anomaly(MaskClassificationSemantic):
             1.0 - max_semantic_prob      # Anomaly (low semantic confidence)
         ], dim=-1)  # [B, Q, 2]
 
-        # Combine with masks same as normality head
+        # Combine with masks same as anomaly head
         crop_logits = torch.einsum(
             "bqhw, bqc -> bchw",
             mask_logits.sigmoid(),

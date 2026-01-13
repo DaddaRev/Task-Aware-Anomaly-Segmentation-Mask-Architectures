@@ -37,11 +37,11 @@ class EoMT_EXT(nn.Module):
 
         self.class_head = nn.Linear(self.encoder.backbone.embed_dim, num_classes + 1)
 
-        # NORMALITY HEAD: Predicts [Normal, Anomaly, No_Object]
+        # ANOMALY HEAD: Predicts [Normal, Anomaly, No_Object]
         # Input: [query_emb (C)] + [entropy (1)] + [max_prob (1)]
         # UPGRADE: MLP allows learning non-linear interactions between semantics and uncertainty
         internal_anomaly_layers = self.encoder.backbone.embed_dim // 10
-        self.normality_head = nn.Sequential(
+        self.anomaly_head = nn.Sequential(
             nn.Linear(self.encoder.backbone.embed_dim + 2, internal_anomaly_layers),
             nn.GELU(),
             nn.Linear(internal_anomaly_layers, 3)
@@ -81,7 +81,7 @@ class EoMT_EXT(nn.Module):
 
         # Inject into normality head
         q_enriched = torch.cat([q, uncertainty_feats], dim=-1)
-        normality_score = self.normality_head(q_enriched)
+        normality_score = self.anomaly_head(q_enriched)
 
         x = x[:, self.num_q + self.encoder.backbone.num_prefix_tokens :, :]
         x = x.transpose(1, 2).reshape(
