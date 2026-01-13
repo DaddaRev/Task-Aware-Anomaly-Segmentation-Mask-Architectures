@@ -284,10 +284,13 @@ class MCS_Anomaly(MaskClassificationSemantic):
         # 6. Log su WandB
         try:
             if hasattr(self.logger, 'experiment') and hasattr(self.logger.experiment, 'log'):
+                from torchvision.transforms.functional import to_pil_image
                 caption = f"{prefix}_L{layer_idx}_Input_GT_NormalityHead_BaselineMSP"
+                # Convert to PIL Image to ensure robust serialization to WandB
+                pil_comparison = to_pil_image(comparison.cpu())
                 self.logger.experiment.log({
                     f"val_images/{prefix}_layer_{layer_idx}": [
-                        wandb.Image(comparison, caption=caption)
+                        wandb.Image(pil_comparison, caption=caption)
                     ]
                 })
         except Exception as e:
