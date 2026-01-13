@@ -104,8 +104,10 @@ class AnomalyInternalDataset(Dataset):
         masks_list = []
         labels_list = []
 
-        # Check for class 0 (Backround) and 1 (Anomaly) presence
-        for class_id in [0, 1]:
+        # Check for class 0 (Background), 1 (Anomaly), and 255 (Void) presence
+        # CRITICAL: Include 255 (void) as it contains normal objects (cars, trees, buildings)
+        # needed for Normality Head training
+        for class_id in [0, 1, 255]:
             if class_id in present_classes:
                 masks_list.append(gt_t == class_id)
                 labels_list.append(class_id)

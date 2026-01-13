@@ -128,13 +128,15 @@ class MCS_Anomaly(MaskClassificationSemantic):
         targets = self._unstack_targets(imgs, targets)
 
         # --- NORMALITY HEAD PARADIGM ---
-        # Train on Normal/Background (label 0), not Anomaly (label 1)
+        # Train on BOTH label 0 (background/road) AND label 255 (void/cars/trees/buildings)
+        # These are ALL "normal" objects (known from Cityscapes pretraining)
+        # Label 1 (anomaly) is NOT supervised → emerges by exclusion
         # The head predicts [Normal, NoObject]
-        # Anomalies emerge as regions with low normality score (inverted later)
         targets_for_loss = []
         for t in targets:
-            keep = t["labels"] == 0  # Only keep Background/Normal
-            new_labels = torch.zeros_like(t["labels"][keep])  # Remap to 0 (Normal class)
+            # Keep BOTH background (0) and void (255) as "Normal"
+            keep = (t["labels"] == 0) | (t["labels"] == 255)
+            new_labels = torch.zeros_like(t["labels"][keep])  # Remap both to 0 (Normal class)
             targets_for_loss.append({
                 "masks": t["masks"][keep],
                 "labels": new_labels
@@ -197,11 +199,48 @@ class MCS_Anomaly(MaskClassificationSemantic):
             self.update_metrics_semantic(logits, targets, i)
 
             if batch_idx == 0:
+                # Compute baseline MSP from frozen class_head for comparison
+                baseline_logits = self._compute_baseline_msp(
+                    mask_logits, class_logits, origins, img_sizes
+                )
                 self.plot_semantic(
-                    imgs[0], targets[0], logits[0], log_prefix, i, batch_idx
+                    imgs[0], targets[0], logits[0], baseline_logits[0],
+                    log_prefix, i, batch_idx
                 )
 
-    def plot_semantic(self, img, target, logits, prefix, layer_idx, batch_idx):
+    def _compute_baseline_msp(self, mask_logits, class_logits, origins, img_sizes):
+        """
+        Compute baseline anomaly detection using Maximum Softmax Probability (MSP)
+        from frozen class_head predictions.
+
+        MSP approach: Anomaly = 1 - max_prob(semantic_classes)
+        Lower confidence on semantic classes → Higher anomaly score
+        """
+        # Get semantic probabilities from frozen class_head [B, Q, 20]
+        semantic_probs = F.softmax(class_logits, dim=-1)
+
+        # Max probability across 19 semantic classes (exclude void class at index 19)
+        max_semantic_prob, _ = semantic_probs[..., :-1].max(dim=-1)  # [B, Q]
+
+        # MSP anomaly score: Low semantic confidence = High anomaly
+        # Create binary classification: [Normal, Anomaly]
+        baseline_probs = torch.stack([
+            max_semantic_prob,           # Normal (high semantic confidence)
+            1.0 - max_semantic_prob      # Anomaly (low semantic confidence)
+        ], dim=-1)  # [B, Q, 2]
+
+        # Combine with masks same as normality head
+        crop_logits = torch.einsum(
+            "bqhw, bqc -> bchw",
+            mask_logits.sigmoid(),
+            baseline_probs
+        )
+
+        # Revert windowing
+        logits = self.revert_window_logits_semantic(crop_logits, origins, img_sizes)
+        return logits
+
+    def plot_semantic(self, img, target, logits, baseline_logits, prefix, layer_idx, batch_idx):
         import wandb
 
         # 1. Immagine Input (Raw) - Ensure [C, H, W] in range 0-1
@@ -213,7 +252,7 @@ class MCS_Anomaly(MaskClassificationSemantic):
                 img_vis = img_vis / 255.0
         img_vis = torch.clamp(img_vis, 0, 1).cpu()
 
-        # 2. Predizione (Probabilità Anomalia) - logits shape: [2, H, W]
+        # 2. Normality Head Prediction (Probabilità Anomalia) - logits shape: [2, H, W]
         # Channel 0 = Normal, Channel 1 = Anomaly
         if logits.dim() == 3 and logits.shape[0] == 2:
             prob_anomaly = torch.softmax(logits, dim=0)[1]  # Get anomaly channel
@@ -223,7 +262,16 @@ class MCS_Anomaly(MaskClassificationSemantic):
         pred_vis = prob_anomaly.unsqueeze(0).repeat(3, 1, 1).cpu()
         pred_vis = torch.clamp(pred_vis, 0, 1)
 
-        # 3. Ground Truth - Anomaly=1 -> White, Background=0 -> Black, Void=255 -> Gray
+        # 3. Baseline MSP Prediction
+        if baseline_logits.dim() == 3 and baseline_logits.shape[0] == 2:
+            baseline_prob_anomaly = torch.softmax(baseline_logits, dim=0)[1]
+        else:
+            baseline_prob_anomaly = torch.sigmoid(baseline_logits[0]) if baseline_logits.dim() == 3 else torch.sigmoid(baseline_logits)
+
+        baseline_vis = baseline_prob_anomaly.unsqueeze(0).repeat(3, 1, 1).cpu()
+        baseline_vis = torch.clamp(baseline_vis, 0, 1)
+
+        # 4. Ground Truth - Anomaly=1 -> White, Background=0 -> Black, Void=255 -> Gray
         target_vis = target.clone().cpu().float()
         vis_map = torch.zeros_like(target_vis, dtype=torch.float32)
 
@@ -233,13 +281,13 @@ class MCS_Anomaly(MaskClassificationSemantic):
 
         vis_t = vis_map.unsqueeze(0).repeat(3, 1, 1)
 
-        # 4. Combina: [Input | Ground Truth | Prediction]
-        comparison = torch.cat([img_vis, vis_t, pred_vis], dim=2)
+        # 5. Combina: [Input | Ground Truth | Normality Head | Baseline MSP]
+        comparison = torch.cat([img_vis, vis_t, pred_vis, baseline_vis], dim=2)
 
-        # 5. Log su WandB
+        # 6. Log su WandB
         try:
             if hasattr(self.logger, 'experiment') and hasattr(self.logger.experiment, 'log'):
-                caption = f"{prefix}_L{layer_idx}_Input_GT_Pred"
+                caption = f"{prefix}_L{layer_idx}_Input_GT_NormalityHead_BaselineMSP"
                 self.logger.experiment.log({
                     f"val_images/{prefix}_layer_{layer_idx}": [
                         wandb.Image(comparison, caption=caption)
