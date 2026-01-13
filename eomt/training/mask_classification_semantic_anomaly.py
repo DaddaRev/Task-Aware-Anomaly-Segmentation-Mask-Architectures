@@ -103,9 +103,9 @@ class MCS_Anomaly(MaskClassificationSemantic):
         # --- Balanced Strategy ---
         # Keep mask_head/upscale frozen to preserve semantic performance.
         # But unfreeze 'q' so queries can adapt to find normal regions.
-        if hasattr(self.network, 'q'):
-            print("Unfreezing query embeddings...")
-            self.network.q.weight.requires_grad = True
+        # if hasattr(self.network, 'q'):
+        #     print("Unfreezing query embeddings...")
+        #     self.network.q.weight.requires_grad = True
 
     def _preprocess_images(self, imgs):
         if imgs.dtype == torch.uint8:
