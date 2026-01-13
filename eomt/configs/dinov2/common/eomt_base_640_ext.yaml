@@ -15,6 +15,22 @@ model:
     # attn_mask_annealing_start_steps: ...
     # attn_mask_annealing_end_steps: ...
 
+    # Learning parameters (important for fine-tuning)
+    lr: 1.0e-5  # Low LR to preserve semantic knowledge
+    weight_decay: 0.05
+    poly_power: 0.9
+    warmup_steps: [100, 200]  # Reduced for small dataset (80 samples)
+
+    # Loss coefficients
+    mask_coefficient: 2.0
+    dice_coefficient: 4.0
+    class_coefficient: 4.0
+
+    # Checkpoint loading (CRITICAL!)
+    ckpt_path: null  # Will be passed via CLI --model.ckpt_path
+    load_ckpt_class_head: true  # Load frozen class_head for prototypes
+    delta_weights: false
+
     network:
       class_path: models.eomt_ext.EoMT_EXT
       init_args:
@@ -30,6 +46,9 @@ data:
   class_path: dsets.training_anomaly.GenericAnomalyDataset
   init_args:
     img_size: [ 1024, 1024 ]
+    batch_size: 1
+    num_workers: 4
+    val_split: 0.2  # 80% train, 20% val
     datasets:
       - name: FS_LostFound_full
         root: eomt_trained_model/Validation_Dataset/FS_LostFound_full
