@@ -246,21 +246,24 @@ class MCS_Anomaly(MaskClassificationSemantic):
                 img_vis = img_vis / 255.0
         img_vis = torch.clamp(img_vis, 0, 1).cpu()
 
-        # 2. Normality Head Prediction (Probabilità Anomalia) - logits shape: [2, H, W]
-        # Channel 0 = Normal, Channel 1 = Anomaly
+        eps = 1e-6
         if logits.dim() == 3 and logits.shape[0] == 2:
-            prob_anomaly = torch.softmax(logits, dim=0)[1]  # Get anomaly channel
+            # We use absolute Anomaly Mass (logits[1]) directly.
+            # This naturally suppresses "No Object" regions (where Anomaly Mass is low).
+            prob_anomaly = logits[1]
         else:
             prob_anomaly = torch.sigmoid(logits[0]) if logits.dim() == 3 else torch.sigmoid(logits)
 
         pred_vis = prob_anomaly.unsqueeze(0).repeat(3, 1, 1).cpu()
         pred_vis = torch.clamp(pred_vis, 0, 1)
 
-        # 3. Baseline MSP Prediction
+        # 3. Baseline MSP (FIXED)
+        # Same logic for baseline: Use absolute Anomaly Mass
         if baseline_logits.dim() == 3 and baseline_logits.shape[0] == 2:
-            baseline_prob_anomaly = torch.softmax(baseline_logits, dim=0)[1]
+            baseline_prob_anomaly = baseline_logits[1]
         else:
-            baseline_prob_anomaly = torch.sigmoid(baseline_logits[0]) if baseline_logits.dim() == 3 else torch.sigmoid(baseline_logits)
+            baseline_prob_anomaly = torch.sigmoid(baseline_logits[0]) if baseline_logits.dim() == 3 else torch.sigmoid(
+                baseline_logits)
 
         baseline_vis = baseline_prob_anomaly.unsqueeze(0).repeat(3, 1, 1).cpu()
         baseline_vis = torch.clamp(baseline_vis, 0, 1)
