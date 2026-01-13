@@ -37,9 +37,10 @@ class EoMT_EXT(nn.Module):
 
         self.class_head = nn.Linear(self.encoder.backbone.embed_dim, num_classes + 1)
 
-        # anomaly_head receives: [query_emb (C)] + [entropy (1)] + [max_prob (1)]
-        # Output: 2 logits -> [Anomaly, No Object]
-        self.anomaly_head = nn.Linear(self.encoder.backbone.embed_dim + 2, 2)
+        # NORMALITY HEAD: Predicts [Normal_Object, No_Object]
+        # Input: [query_emb (C)] + [entropy (1)] + [max_prob (1)]
+        # Anomaly detection via inversion: anomaly = 1 - normality
+        self.normality_head = nn.Linear(self.encoder.backbone.embed_dim + 2, 2)
 
         self.mask_head = nn.Sequential(
             nn.Linear(self.encoder.backbone.embed_dim, self.encoder.backbone.embed_dim),
@@ -73,9 +74,9 @@ class EoMT_EXT(nn.Module):
         # stop_gradient just in case, though class_head is frozen in training loop usually
         uncertainty_feats = torch.cat([entropy, max_prob], dim=-1).detach()
 
-        # Inject into anomaly head
+        # Inject into normality head
         q_enriched = torch.cat([q, uncertainty_feats], dim=-1)
-        anomaly_score = self.anomaly_head(q_enriched)
+        normality_score = self.normality_head(q_enriched)
 
         x = x[:, self.num_q + self.encoder.backbone.num_prefix_tokens :, :]
         x = x.transpose(1, 2).reshape(
@@ -86,7 +87,7 @@ class EoMT_EXT(nn.Module):
             "bqc, bchw -> bqhw", self.mask_head(q), self.upscale(x)
         )
 
-        return mask_logits, class_logits, anomaly_score
+        return mask_logits, class_logits, normality_score
 
     @torch.compiler.disable
     def _disable_attn_mask(self, attn_mask, prob):
@@ -180,7 +181,7 @@ class EoMT_EXT(nn.Module):
             x = self.encoder.backbone._pos_embed(x)
 
         attn_mask = None
-        mask_logits_per_layer, class_logits_per_layer, anomaly_logits_per_layer = [], [], []
+        mask_logits_per_layer, class_logits_per_layer, normality_logits_per_layer = [], [], []
 
         for i, block in enumerate(self.encoder.backbone.blocks):
             if i == len(self.encoder.backbone.blocks) - self.num_blocks:
@@ -192,10 +193,10 @@ class EoMT_EXT(nn.Module):
                 self.masked_attn_enabled
                 and i >= len(self.encoder.backbone.blocks) - self.num_blocks
             ):
-                mask_logits, class_logits, anomaly_logits = self._predict(self.encoder.backbone.norm(x))
+                mask_logits, class_logits, normality_logits = self._predict(self.encoder.backbone.norm(x))
                 mask_logits_per_layer.append(mask_logits)
                 class_logits_per_layer.append(class_logits)
-                anomaly_logits_per_layer.append(anomaly_logits)
+                normality_logits_per_layer.append(normality_logits)
 
                 attn_mask = self._attn_mask(x, mask_logits, i)
 
@@ -215,13 +216,13 @@ class EoMT_EXT(nn.Module):
             elif hasattr(block, "layer_scale2"):
                 x = x + block.layer_scale2(mlp_out)
 
-        mask_logits, class_logits, anomaly_logits = self._predict(self.encoder.backbone.norm(x))
+        mask_logits, class_logits, normality_logits = self._predict(self.encoder.backbone.norm(x))
         mask_logits_per_layer.append(mask_logits)
         class_logits_per_layer.append(class_logits)
-        anomaly_logits_per_layer.append(anomaly_logits)
+        normality_logits_per_layer.append(normality_logits)
 
         return (
             mask_logits_per_layer,
             class_logits_per_layer,
-            anomaly_logits_per_layer
+            normality_logits_per_layer
         )

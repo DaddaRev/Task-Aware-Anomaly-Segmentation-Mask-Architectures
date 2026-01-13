@@ -136,7 +136,8 @@ class GenericAnomalyDataset(LightningDataModule):
             num_workers: int = 4,
             path: str = "",
             num_classes: int = 19,
-            check_empty_targets: bool = False
+            check_empty_targets: bool = False,
+            val_split: float = 0.2  # 20% for validation
     ):
         super().__init__(
             path=path,
@@ -149,14 +150,27 @@ class GenericAnomalyDataset(LightningDataModule):
 
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.val_split = val_split
 
-        # Istanziamo il dataset interno qui.
-        # Questo oggetto è più semplice e sicuro da passare ai worker.
-        self.dataset = AnomalyInternalDataset(datasets, img_size)
+        # Istanziamo il dataset interno completo
+        full_dataset = AnomalyInternalDataset(datasets, img_size)
+
+        # Split train/val
+        total_samples = len(full_dataset)
+        val_size = int(total_samples * val_split)
+        train_size = total_samples - val_size
+
+        # Fixed seed for reproducibility
+        generator = torch.Generator().manual_seed(42)
+        self.train_dataset, self.val_dataset = torch.utils.data.random_split(
+            full_dataset, [train_size, val_size], generator=generator
+        )
+
+        print(f"Dataset split: {train_size} train, {val_size} val samples")
 
     def train_dataloader(self):
         return DataLoader(
-            self.dataset,
+            self.train_dataset,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             shuffle=True,
@@ -167,7 +181,7 @@ class GenericAnomalyDataset(LightningDataModule):
 
     def val_dataloader(self):
         return DataLoader(
-            self.dataset,
+            self.val_dataset,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             shuffle=False,
@@ -177,7 +191,7 @@ class GenericAnomalyDataset(LightningDataModule):
 
     def test_dataloader(self):
         return DataLoader(
-            self.dataset,
+            self.val_dataset,  # Use val set for testing
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             shuffle=False,

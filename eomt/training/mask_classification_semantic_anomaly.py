@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-from torchvision.utils import save_image, make_grid
+from torchvision.utils import save_image
 from typing import Optional, List
 
 from .mask_classification_loss import MaskClassificationLoss
@@ -94,14 +94,15 @@ class MCS_Anomaly(MaskClassificationSemantic):
         for param in self.network.parameters():
             param.requires_grad = False
 
-        if hasattr(self.network, 'anomaly_head'):
-            print("Unfreezing anomaly_head params...")
-            for param in self.network.anomaly_head.parameters():
+        # Unfreeze NORMALITY HEAD (trainable)
+        if hasattr(self.network, 'normality_head'):
+            print("Unfreezing normality_head params...")
+            for param in self.network.normality_head.parameters():
                 param.requires_grad = True
 
         # --- Balanced Strategy ---
         # Keep mask_head/upscale frozen to preserve semantic performance.
-        # But unfreeze 'q' so queries can adapt to find anomalies.
+        # But unfreeze 'q' so queries can adapt to find normal regions.
         if hasattr(self.network, 'q'):
             print("Unfreezing query embeddings...")
             self.network.q.weight.requires_grad = True
@@ -126,29 +127,28 @@ class MCS_Anomaly(MaskClassificationSemantic):
         imgs, targets = batch
         targets = self._unstack_targets(imgs, targets)
 
-        # --- Target Formatting for 2-Logit Head (Anomaly vs NoObject) ---
-        # 1. We only supervise Anomaly objects. Normality is "No Object".
-        # 2. We remap Global Label 1 (Anomaly) -> Local Label 0.
-        #    Why? Because the head predicts [Anomaly, NoObject]. The Loss expects positive classes to start at 0.
+        # --- NORMALITY HEAD PARADIGM ---
+        # Train on Normal/Background (label 0), not Anomaly (label 1)
+        # The head predicts [Normal, NoObject]
+        # Anomalies emerge as regions with low normality score (inverted later)
         targets_for_loss = []
         for t in targets:
-            print(t)
-            keep = t["labels"] == 1  # Only keep Anomaly
-            new_labels = torch.zeros_like(t["labels"][keep]) # Remap to 0
+            keep = t["labels"] == 0  # Only keep Background/Normal
+            new_labels = torch.zeros_like(t["labels"][keep])  # Remap to 0 (Normal class)
             targets_for_loss.append({
                 "masks": t["masks"][keep],
                 "labels": new_labels
             })
 
-        mask_logits_per_block, class_logits_per_block, anomaly_logits_per_block = self(imgs)
+        mask_logits_per_block, class_logits_per_block, normality_logits_per_block = self(imgs)
 
         losses_all_blocks = {}
-        for i, (mask_logits, class_logits, anomaly_logits) in enumerate(
-                list(zip(mask_logits_per_block, class_logits_per_block, anomaly_logits_per_block))
+        for i, (mask_logits, class_logits, normality_logits) in enumerate(
+                list(zip(mask_logits_per_block, class_logits_per_block, normality_logits_per_block))
         ):
             losses = self.criterion_anomalymask(
                 masks_queries_logits=mask_logits,
-                class_queries_logits=anomaly_logits,
+                class_queries_logits=normality_logits,
                 targets=targets_for_loss,
             )
             block_postfix = self.block_postfix(i)
@@ -164,26 +164,27 @@ class MCS_Anomaly(MaskClassificationSemantic):
 
         crops, origins = self.window_imgs_semantic(imgs)
 
-        mask_logits_per_layer, class_logits_per_layer, anomaly_logits_per_layer = self(crops)
+        mask_logits_per_layer, class_logits_per_layer, normality_logits_per_layer = self(crops)
 
         targets = self.to_per_pixel_targets_semantic(targets, self.ignore_idx)
 
-        for i, (mask_logits, class_logits, anomaly_logits) in enumerate(
-                list(zip(mask_logits_per_layer, class_logits_per_layer, anomaly_logits_per_layer))
+        for i, (mask_logits, class_logits, normality_logits) in enumerate(
+                list(zip(mask_logits_per_layer, class_logits_per_layer, normality_logits_per_layer))
         ):
-            probs_anomaly = anomaly_logits.softmax(dim=-1)
+            probs_normality = normality_logits.softmax(dim=-1)
 
-            # --- We construct a 2-class probability distribution [B, Q, 2] ---
-            # anomaly_head output is now 2 dim: [Anomaly, No Object]
-            # We want downstream: Channel 0 = Normal/Void, Channel 1 = Anomaly
+            # --- NORMALITY HEAD INVERSION ---
+            # normality_head output: [Normal, NoObject]
+            # We want: Channel 0 = Background/Normal, Channel 1 = Anomaly
+            # Inversion: anomaly_prob = 1 - normal_prob
             valid_probs = torch.stack([
-                probs_anomaly[..., 1],  # Normal/Void (was "No Object")
-                probs_anomaly[..., 0]   # Anomaly
+                probs_normality[..., 0],      # Normal (keep as is)
+                1.0 - probs_normality[..., 0] # Anomaly (inverted from normal)
             ], dim=-1)
 
             mask_logits = F.interpolate(mask_logits, self.img_size, mode="bilinear")
 
-            # Explicitly combine Mask Probs (sigmoid) with Class Probs using Einsum
+            # Combine Mask Probs (sigmoid) with Class Probs
             # [B, Q, H, W] x [B, Q, 2] -> [B, 2, H, W]
             crop_logits = torch.einsum(
                 "bqhw, bqc -> bchw",
@@ -203,52 +204,49 @@ class MCS_Anomaly(MaskClassificationSemantic):
     def plot_semantic(self, img, target, logits, prefix, layer_idx, batch_idx):
         import wandb
 
-        # 1. Immagine Input (Raw)
-        # Se l'immagine è uint8 (0-255), la portiamo a float 0-1.
-        # Se è già float, ci assicuriamo che sia nel range 0-1.
+        # 1. Immagine Input (Raw) - Ensure [C, H, W] in range 0-1
         if img.dtype == torch.uint8:
             img_vis = img.float() / 255.0
         else:
-            img_vis = img.clone().cpu()
-            # Se per qualche motivo arriva in range 0-255 float
+            img_vis = img.clone()
             if img_vis.max() > 1.1:
                 img_vis = img_vis / 255.0
-
         img_vis = torch.clamp(img_vis, 0, 1).cpu()
 
-        # 2. Predizione (Probabilità)
-        # logits are just of anomaly class
-        prob_vis = F.softmax(logits) #anomaly probs
-        print(prob_vis)
-        pred_vis = prob_vis.unsqueeze(0).repeat(3, 1, 1)
+        # 2. Predizione (Probabilità Anomalia) - logits shape: [2, H, W]
+        # Channel 0 = Normal, Channel 1 = Anomaly
+        if logits.dim() == 3 and logits.shape[0] == 2:
+            prob_anomaly = torch.softmax(logits, dim=0)[1]  # Get anomaly channel
+        else:
+            prob_anomaly = torch.sigmoid(logits[0]) if logits.dim() == 3 else torch.sigmoid(logits)
+
+        pred_vis = prob_anomaly.unsqueeze(0).repeat(3, 1, 1).cpu()
         pred_vis = torch.clamp(pred_vis, 0, 1)
 
-        # 3. Ground Truth (BG=0, Void=100, Anomaly=255)
-        target_vis = target.clone().cpu()
-        vis_t = torch.zeros_like(pred_vis)  # [3, H, W]
-
-        # Creiamo un canale unico prima
+        # 3. Ground Truth - Anomaly=1 -> White, Background=0 -> Black, Void=255 -> Gray
+        target_vis = target.clone().cpu().float()
         vis_map = torch.zeros_like(target_vis, dtype=torch.float32)
 
-        # Mappa: Anomalia (1) -> Bianco (1.0)
-        vis_map[target_vis == 1] = 1.0
-        # Mappa: Void (255) -> Grigio (100/255 ~= 0.39)
-        vis_map[target_vis == self.ignore_idx] = 100.0 / 255.0
+        vis_map[target_vis == 1] = 1.0       # Anomaly -> White
+        vis_map[target_vis == self.ignore_idx] = 0.4  # Void -> Gray
+        # Background (0) stays black (0.0)
 
-        # Replica su 3 canali per RGB
         vis_t = vis_map.unsqueeze(0).repeat(3, 1, 1)
 
-        # 4. Combina: [Input Originale | Ground Truth | Predizione Probabilità]
+        # 4. Combina: [Input | Ground Truth | Prediction]
         comparison = torch.cat([img_vis, vis_t, pred_vis], dim=2)
 
         # 5. Log su WandB
-        if hasattr(self.logger, 'experiment') and hasattr(self.logger.experiment, 'log'):
-            caption = f"{prefix}_L{layer_idx}_Input_GT_PredProb"
-            self.logger.experiment.log({
-                f"val_images/{prefix}_layer_{layer_idx}": [
-                    wandb.Image(comparison, caption=caption)
-                ]
-            })
+        try:
+            if hasattr(self.logger, 'experiment') and hasattr(self.logger.experiment, 'log'):
+                caption = f"{prefix}_L{layer_idx}_Input_GT_Pred"
+                self.logger.experiment.log({
+                    f"val_images/{prefix}_layer_{layer_idx}": [
+                        wandb.Image(comparison, caption=caption)
+                    ]
+                })
+        except Exception as e:
+            print(f"Warning: Could not log to wandb: {e}")
 
         # Debug locale (opzionale)
         if batch_idx == 0 and layer_idx == 0:
