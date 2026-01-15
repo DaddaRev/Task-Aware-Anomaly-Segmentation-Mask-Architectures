@@ -22,8 +22,8 @@ model:
     warmup_steps: [100, 200]  # Reduced for small dataset (80 samples)
 
     # Loss coefficients
-    mask_coefficient: 2.0
-    dice_coefficient: 2.0
+    mask_coefficient: 4.0
+    dice_coefficient: 4.0
     class_coefficient: 2.0
 
     # Checkpoint loading (CRITICAL!)
