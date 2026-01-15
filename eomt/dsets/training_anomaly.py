@@ -19,6 +19,8 @@ def normalize_gt(gt: np.ndarray, gt_format: str) -> np.ndarray:
         return np.where(gt == IGNORE_INDEX, IGNORE_INDEX, (gt > 0).astype(np.uint8)).astype(np.uint8)
     if fmt == "binary_255_is_ood":
         return (gt == IGNORE_INDEX).astype(np.uint8)
+    if fmt == "binary_255_is_bg_else_ood":
+        return np.where(gt == IGNORE_INDEX, 0, 1)
     raise ValueError(f"Unknown gt_format='{gt_format}'")
 
 
