@@ -192,7 +192,7 @@ class MCS_Anomaly(MaskClassificationSemantic):
 
             self.update_metrics_semantic(logits, targets, i)
 
-            if batch_idx == 0:
+            if batch_idx in [0,8,16,64]:
                 # Compute baseline MSP from frozen class_head for comparison
                 baseline_logits = self._compute_baseline_msp(
                     mask_logits, class_logits, origins, img_sizes
