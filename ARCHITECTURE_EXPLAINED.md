@@ -57,7 +57,7 @@ The MLP learns non-linear decision boundaries such as:
 1.  **Forward Pass**: The image goes through DinoV2 -> Decoder -> Queries.
 2.  **Uncertainty Extraction**: The frozen Class Head predicts logits; their entropy is calculated.
 3.  **Anomaly Prediction**: The `Anomaly Head` predicts logits a `[B, Q, 3]` tensor.
-4.  **Loss**: Cross-Entropy Loss forces the head to learn the mapping from (Features + Uncertainty) to Ground Truth (0=Background, 1=Anomaly, 2=Void).
+4.  **Loss**: Cross-Entropy Loss forces the head to learn the mapping from (Features + Uncertainty) to Ground Truth (0=Background, 1=Anomaly, 255(2)=Void).
 
 ## Output Visualization
 The final Anomaly Map is constructed by combining the mask predictions with the `Anomaly` probability mass from the head:
