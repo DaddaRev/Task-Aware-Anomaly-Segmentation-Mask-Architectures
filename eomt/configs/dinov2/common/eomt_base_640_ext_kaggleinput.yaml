@@ -51,7 +51,7 @@ data:
     val_split: 0.2  # 80% train, 20% val
     datasets:
       - name: CocoCity
-        root: eomt_trained_model/coco_city/data/synth/cs_coco_anom_v1/val
+        root: ../../../input/cococity-train/train
         images_dir: images
         masks_dir: gt_pixel
         image_glob : "*.png"
