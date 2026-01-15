@@ -40,7 +40,7 @@ class EoMT_EXT(nn.Module):
         # ANOMALY HEAD: Predicts [Normal, Anomaly, No_Object]
         # Input: [query_emb (C)] + [entropy (1)] + [max_prob (1)]
         # UPGRADE: MLP allows learning non-linear interactions between semantics and uncertainty
-        internal_anomaly_layers = self.encoder.backbone.embed_dim // 10
+        internal_anomaly_layers = self.encoder.backbone.embed_dim // 2
         self.anomaly_head = nn.Sequential(
             nn.Linear(self.encoder.backbone.embed_dim + 2, internal_anomaly_layers),
             nn.GELU(),
