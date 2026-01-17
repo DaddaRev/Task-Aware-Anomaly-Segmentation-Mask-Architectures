@@ -51,7 +51,7 @@ data:
     val_split: 0.1  # 80% train, 20% val
     datasets:
       - name: CocoCity
-        root: ../../../input/cococity-train/train
+        root: /content/MaskArchitectureAnomaly/eomt/dataset_coco-anomaly/data/synth/cs_coco_anom_v2/train  #To run on Colab
         images_dir: images
         masks_dir: gt_pixel
         image_glob : "*.png"

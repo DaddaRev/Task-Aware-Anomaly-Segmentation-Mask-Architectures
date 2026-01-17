@@ -110,7 +110,7 @@ class MCS_Anomaly(MaskClassificationSemantic):
     def _preprocess_images(self, imgs):
         if imgs.dtype == torch.uint8:
             imgs = imgs.float() / 255.0
-        #imgs = (imgs - self.pixel_mean) / self.pixel_std
+        imgs = (imgs - self.pixel_mean) / self.pixel_std
         return imgs
 
     def forward(self, x):
@@ -249,7 +249,7 @@ class MCS_Anomaly(MaskClassificationSemantic):
         eps = 1e-6
         if logits.dim() == 3 and logits.shape[0] == 2:
             # We use absolute Anomaly Mass (logits[1]) directly.
-            # This naturally suppresses "No Object" regions (where Anomaly Mass is low).
+            # This naturally   "No Object" regions (where Anomaly Mass is low).
             prob_anomaly = logits[1]
         else:
             prob_anomaly = torch.sigmoid(logits[0]) if logits.dim() == 3 else torch.sigmoid(logits)
