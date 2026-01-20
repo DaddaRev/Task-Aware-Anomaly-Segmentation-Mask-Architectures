@@ -163,14 +163,14 @@ class MCS_Anomaly(MaskClassificationSemantic):
         targets = self._unstack_targets(imgs, targets)
         img_sizes = [img.shape[-2:] for img in imgs]
 
-        # Image normalization, if needed
-        if imgs.dtype == torch.uint8:
-            imgs = imgs.float() / 255.0
-
         # DEBUG --> Print input stats to check the preprocessing
         print(f"Input Stats - Type: {imgs.dtype}, Min: {imgs.min()}, Max: {imgs.max()}, Mean: {imgs.float().mean():.2f}")
 
         crops, origins = self.window_imgs_semantic(imgs)
+
+        # Normalization, if needed
+        if crops.dtype == torch.uint8:
+            crops = crops.float() / 255.0
 
         mask_logits_per_layer, class_logits_per_layer, anomaly_logits_per_layer = self(crops)
 
