@@ -140,6 +140,7 @@ class MCS_Anomaly(MaskClassificationSemantic):
                 "labels": t["labels"][keep] # Labels are already 0 and 1
             })
 
+        # Forward Pass --> 20 class logits for each query (100 queries)
         mask_logits_per_block, class_logits_per_block, anomaly_logits_per_block = self(imgs)
 
         losses_all_blocks = {}
@@ -162,6 +163,9 @@ class MCS_Anomaly(MaskClassificationSemantic):
         targets = self._unstack_targets(imgs, targets)
         img_sizes = [img.shape[-2:] for img in imgs]
 
+        # DEBUG --> Print input stats to check the preprocessing
+        print(f"Input Stats - Min: {imgs.min():.2f}, Max: {imgs.max():.2f}, Mean: {imgs.mean():.2f}")
+
         crops, origins = self.window_imgs_semantic(imgs)
 
         mask_logits_per_layer, class_logits_per_layer, anomaly_logits_per_layer = self(crops)
@@ -171,6 +175,46 @@ class MCS_Anomaly(MaskClassificationSemantic):
         for i, (mask_logits, class_logits, anomaly_logits) in enumerate(
                 list(zip(mask_logits_per_layer, class_logits_per_layer, anomaly_logits_per_layer))
         ):
+            # --- [START] DEBUG 2 INSERTION POINT ---
+            # We check 'if batch_idx == 0' to run it only once per validation epoch
+            # We check 'i == ...' to look only at the FINAL layer (most important one)
+            
+            if batch_idx == 0 and i == len(mask_logits_per_layer) - 1:
+                import numpy as np 
+                
+                print(f"\n--- DEBUG: Semantic Class Distribution (Batch {batch_idx}, Layer {i}) ---")
+
+                # Cityscapes Classes mapping for decoding
+                CITYSCAPES_CLASSES = [
+                    'Road', 'Sidewalk', 'Building', 'Wall', 'Fence', 'Pole', 
+                    'Traffic Light', 'Traffic Sign', 'Vegetation', 'Terrain', 'Sky', 
+                    'Person', 'Rider', 'Car', 'Truck', 'Bus', 'Train', 
+                    'Motorcycle', 'Bicycle'
+                ]
+
+                # Get probabilities and predicted classes
+                # class_logits shape: [B, Q, 20]
+                sem_probs = F.softmax(class_logits, dim=-1) 
+                _, max_classes = sem_probs.max(dim=-1) # [B, Q]
+
+                # Analyze only the first image in the batch [0]
+                flat_classes = max_classes[0].cpu().numpy() # [Q]
+                unique, counts = np.unique(flat_classes, return_counts=True)
+                
+                print("Top 5 Predicted Classes by Query Count:")
+                # Sort indices by count descending
+                sorted_idxs = np.argsort(-counts)[:5] 
+                
+                for idx in sorted_idxs:
+                    class_id = unique[idx]
+                    count = counts[idx]
+                    # Safety check for index out of bounds
+                    class_name = CITYSCAPES_CLASSES[class_id] if class_id < len(CITYSCAPES_CLASSES) else f"Unknown({class_id})"
+                    print(f"  -> Class {class_id} ({class_name}): {count} queries")
+                
+                print("----------------------------------------------------------------\n")
+            # --- [END] DEBUG 2 INSERTION POINT ---
+
             probs_anomaly = anomaly_logits.softmax(dim=-1)
 
             # --- ANOMALY HEAD DIRECT PREDICTION ---
