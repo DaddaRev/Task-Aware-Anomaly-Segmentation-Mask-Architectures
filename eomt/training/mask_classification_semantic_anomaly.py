@@ -124,20 +124,9 @@ class MCS_Anomaly(MaskClassificationSemantic):
         return targets
 
     def _preprocess_input(self, tensor_img):
-        """
-        Converts images from uint8 (0-255) to standardized float for DinoV2.
-        Applies:
-        1. Division by 255.0 (Normalization 0-1)
-        2. ImageNet Standardization (Mean/Std) - Crucial for the backbone!
-        """
-        # Float conversion and scaling
         if tensor_img.dtype == torch.uint8:
-            tensor_img = tensor_img.float() / 255.0
-        
-        mean = torch.tensor([0.485, 0.456, 0.406], device=tensor_img.device).view(1, 3, 1, 1)
-        std = torch.tensor([0.229, 0.224, 0.225], device=tensor_img.device).view(1, 3, 1, 1)
-        
-        return (tensor_img - mean) / std
+         tensor_img = tensor_img.float() / 255.0
+        return tensor_img
 
     def training_step(self, batch, batch_idx):
         imgs, targets = batch
