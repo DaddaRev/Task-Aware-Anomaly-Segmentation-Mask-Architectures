@@ -123,11 +123,30 @@ class MCS_Anomaly(MaskClassificationSemantic):
             return [{k: v[i] for k, v in targets.items()} for i in range(batch_size)]
         return targets
 
+    def _preprocess_input(self, tensor_img):
+        """
+        Converts images from uint8 (0-255) to standardized float for DinoV2.
+        Applies:
+        1. Division by 255.0 (Normalization 0-1)
+        2. ImageNet Standardization (Mean/Std) - Crucial for the backbone!
+        """
+        # Float conversion and scaling
+        if tensor_img.dtype == torch.uint8:
+            tensor_img = tensor_img.float() / 255.0
+        
+        mean = torch.tensor([0.485, 0.456, 0.406], device=tensor_img.device).view(1, 3, 1, 1)
+        std = torch.tensor([0.229, 0.224, 0.225], device=tensor_img.device).view(1, 3, 1, 1)
+        
+        return (tensor_img - mean) / std
+
     def training_step(self, batch, batch_idx):
         imgs, targets = batch
         targets = self._unstack_targets(imgs, targets)
 
-        # --- UPDATED PARADIGM ---
+        # Preprocess input images
+        imgs = self._preprocess_input(imgs)
+
+        # Prepare targets for anomaly mask loss
         # Class 0: Normal (Road, etc)
         # Class 1: Anomaly (Explicit supervision on anomalies)
         # Class 255: Void -> Map to No-Object (Implicitly ignored by not including in targets)
@@ -168,9 +187,11 @@ class MCS_Anomaly(MaskClassificationSemantic):
 
         crops, origins = self.window_imgs_semantic(imgs)
 
-        # Normalization, if needed
-        if crops.dtype == torch.uint8:
-            crops = crops.float() / 255.0
+        crops = self._preprocess_input(crops)
+
+        # DEBUG: Check crops stats after preprocessing
+        if batch_idx == 0:
+            print(f"DEBUG CROPS (To Model) -> Type: {crops.dtype}, Min: {crops.min():.2f}, Max: {crops.max():.2f}, Mean: {crops.mean():.2f}")
 
         mask_logits_per_layer, class_logits_per_layer, anomaly_logits_per_layer = self(crops)
 
@@ -179,7 +200,6 @@ class MCS_Anomaly(MaskClassificationSemantic):
         for i, (mask_logits, class_logits, anomaly_logits) in enumerate(
                 list(zip(mask_logits_per_layer, class_logits_per_layer, anomaly_logits_per_layer))
         ):
-            # --- [START] DEBUG 2 INSERTION POINT ---
             # We check 'if batch_idx == 0' to run it only once per validation epoch
             # We check 'i == ...' to look only at the FINAL layer (most important one)
             
