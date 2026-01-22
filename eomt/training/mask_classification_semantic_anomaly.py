@@ -285,6 +285,38 @@ class MCS_Anomaly(MaskClassificationSemantic):
             except Exception:
                 pass
 
+    def _compute_baseline_msp(self, mask_logits, class_logits, origins, img_sizes):
+            """
+            Compute baseline anomaly detection using Maximum Softmax Probability (MSP)
+            from frozen class_head predictions.
+
+            MSP approach: Anomaly = 1 - max_prob(semantic_classes)
+            Lower confidence on semantic classes → Higher anomaly score
+            """
+            # Get semantic probabilities from frozen class_head [B, Q, 20]
+            semantic_probs = F.softmax(class_logits, dim=-1)
+
+            # Max probability across 19 semantic classes (exclude void class at index 19)
+            max_semantic_prob, _ = semantic_probs[..., :-1].max(dim=-1)  # [B, Q]
+
+            # MSP anomaly score: Low semantic confidence = High anomaly
+            # Create binary classification: [Normal, Anomaly]
+            baseline_probs = torch.stack([
+                max_semantic_prob,           # Normal (high semantic confidence)
+                1.0 - max_semantic_prob      # Anomaly (low semantic confidence)
+            ], dim=-1)  # [B, Q, 2]
+
+            # Combine with masks same as anomaly head
+            crop_logits = torch.einsum(
+                "bqhw, bqc -> bchw",
+                mask_logits.sigmoid(),
+                baseline_probs
+            )
+
+            # Revert windowing
+            logits = self.revert_window_logits_semantic(crop_logits, origins, img_sizes)
+            return logits
+
 '''
     def eval_step(self, batch, batch_idx=None, log_prefix=None):
         imgs, targets = batch
@@ -378,39 +410,6 @@ class MCS_Anomaly(MaskClassificationSemantic):
                     imgs[0], targets[0], logits[0], baseline_logits[0],
                     log_prefix, i, batch_idx
                 )
-
-    def _compute_baseline_msp(self, mask_logits, class_logits, origins, img_sizes):
-        """
-        Compute baseline anomaly detection using Maximum Softmax Probability (MSP)
-        from frozen class_head predictions.
-
-        MSP approach: Anomaly = 1 - max_prob(semantic_classes)
-        Lower confidence on semantic classes → Higher anomaly score
-        """
-        # Get semantic probabilities from frozen class_head [B, Q, 20]
-        semantic_probs = F.softmax(class_logits, dim=-1)
-
-        # Max probability across 19 semantic classes (exclude void class at index 19)
-        max_semantic_prob, _ = semantic_probs[..., :-1].max(dim=-1)  # [B, Q]
-
-        # MSP anomaly score: Low semantic confidence = High anomaly
-        # Create binary classification: [Normal, Anomaly]
-        baseline_probs = torch.stack([
-            max_semantic_prob,           # Normal (high semantic confidence)
-            1.0 - max_semantic_prob      # Anomaly (low semantic confidence)
-        ], dim=-1)  # [B, Q, 2]
-
-        # Combine with masks same as anomaly head
-        crop_logits = torch.einsum(
-            "bqhw, bqc -> bchw",
-            mask_logits.sigmoid(),
-            baseline_probs
-        )
-
-        # Revert windowing
-        logits = self.revert_window_logits_semantic(crop_logits, origins, img_sizes)
-        return logits
-    
 
     def plot_semantic(self, img, target, logits, baseline_logits, prefix, layer_idx, batch_idx):
         import wandb
