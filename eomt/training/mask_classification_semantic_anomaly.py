@@ -168,8 +168,6 @@ class MCS_Anomaly(MaskClassificationSemantic):
 
         crops, origins = self.window_imgs_semantic(imgs)
 
-        crops = self._preprocess_input(crops)
-
         mask_logits_per_layer, class_logits_per_layer, anomaly_logits_per_layer = self(crops)
 
         targets = self.to_per_pixel_targets_semantic(targets, self.ignore_idx)
