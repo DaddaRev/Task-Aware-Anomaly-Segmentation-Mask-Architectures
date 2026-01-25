@@ -163,9 +163,6 @@ class MCS_Anomaly(MaskClassificationSemantic):
         targets = self._unstack_targets(imgs, targets)
         img_sizes = [img.shape[-2:] for img in imgs]
 
-        # DEBUG --> Print input stats to check the preprocessing
-        print(f"Input Stats - Type: {imgs.dtype}, Min: {imgs.min()}, Max: {imgs.max()}, Mean: {imgs.float().mean():.2f}")
-
         crops, origins = self.window_imgs_semantic(imgs)
 
         mask_logits_per_layer, class_logits_per_layer, anomaly_logits_per_layer = self(crops)
@@ -182,41 +179,36 @@ class MCS_Anomaly(MaskClassificationSemantic):
             # anomaly_head output: [Normal, Anomaly, NoObject]
             # We want: Channel 0 = Normal, Channel 1 = Anomaly
             valid_probs = probs_anomaly[..., :2]
-
             mask_logits = F.interpolate(mask_logits, self.img_size, mode="bilinear")
-
-            # REMOVE THIS AFTER DEBUG:
-            crop_logits = self.to_per_pixel_logits_semantic(mask_logits, class_logits)
 
             # Combine Mask Probs (sigmoid) with Class Probs
             # [B, Q, H, W] x [B, Q, 2] -> [B, 2, H, W]
-            #crop_logits = torch.einsum(
-            #    "bqhw, bqc -> bchw",
-            #    mask_logits.sigmoid(),
-            #    valid_probs
-            #)
+            crop_logits = torch.einsum(
+                "bqhw, bqc -> bchw",
+                mask_logits.sigmoid(),
+                valid_probs
+            )
 
             logits = self.revert_window_logits_semantic(crop_logits, origins, img_sizes)
-
             self.update_metrics_semantic(logits, targets, i)
 
-            if batch_idx == 0:
-                self.plot_semantic(
-                    imgs[0], targets[0], logits[0], log_prefix, i, batch_idx
+            if batch_idx in [0,8,16,64]:
+               # Compute baseline MSP from frozen class_head for comparison
+                semantic_probs = class_logits.softmax(dim=-1)[..., :-1]
+
+                crop_sem_logits = torch.einsum(
+                    "bqhw, bqc -> bchw",
+                    mask_logits.sigmoid(),
+                    semantic_probs
                 )
 
-            #if batch_idx in [0,8,16,64]:
-            #    # Compute baseline MSP from frozen class_head for comparison
-            #    baseline_logits = self._compute_baseline_msp(
-            #        mask_logits, class_logits, origins, img_sizes
-            #    )
-            #    self.plot_semantic(
-            #        imgs[0], targets[0], logits[0], baseline_logits[0],
-            #        log_prefix, i, batch_idx
-            #  )
+                sem_logits = self.revert_window_logits_semantic(crop_sem_logits, origins, img_sizes)
+                self.plot_semantic_new(
+                    imgs[0], targets[0], logits[0], sem_logits[0],
+                    log_prefix, i, batch_idx
+                )
 
-    '''
-    def plot_semantic(self, img, target, logits, baseline_logits, prefix, layer_idx, batch_idx):
+    def plot_semantic_new(self, img, target, logits, fourth_panel_data, prefix, layer_idx, batch_idx):
         import wandb
 
         # 1. Immagine Input (Raw) - Ensure [C, H, W] in range 0-1
@@ -239,35 +231,36 @@ class MCS_Anomaly(MaskClassificationSemantic):
         pred_vis = prob_anomaly.unsqueeze(0).repeat(3, 1, 1).cpu()
         pred_vis = torch.clamp(pred_vis, 0, 1)
 
-        # 3. Baseline MSP (FIXED)
-        # Same logic for baseline: Use absolute Anomaly Mass
-        if baseline_logits.dim() == 3 and baseline_logits.shape[0] == 2:
-            baseline_prob_anomaly = baseline_logits[1]
-        else:
-            baseline_prob_anomaly = torch.sigmoid(baseline_logits[0]) if baseline_logits.dim() == 3 else torch.sigmoid(
-                baseline_logits)
-
-        baseline_vis = baseline_prob_anomaly.unsqueeze(0).repeat(3, 1, 1).cpu()
-        baseline_vis = torch.clamp(baseline_vis, 0, 1)
-
-        # 4. Ground Truth - Anomaly=1 -> White, Background=0 -> Black, Void=255 -> Gray
+        # Ground Truth - Anomaly=1 -> White, Background=0 -> Black, Void=255 -> Gray
         target_vis = target.clone().cpu().float()
         vis_map = torch.zeros_like(target_vis, dtype=torch.float32)
-
         vis_map[target_vis == 1] = 1.0       # Anomaly -> White
         vis_map[target_vis == self.ignore_idx] = 0.4  # Void -> Gray
-        # Background (0) stays black (0.0)
-
         vis_t = vis_map.unsqueeze(0).repeat(3, 1, 1)
 
-        # 5. Combina: [Input | Ground Truth | Normality Head | Baseline MSP]
-        comparison = torch.cat([img_vis, vis_t, pred_vis, baseline_vis], dim=2)
+        # Semantic logits from baseline model (frozen class head)
+        fourth_vis = None
+        if fourth_panel_data.dim() == 3 and fourth_panel_data.shape[0] > 2:
+            sem_indices = torch.argmax(fourth_panel_data, dim=0).cpu() # [H, W]
+            fourth_vis = self._apply_colormap(sem_indices) # [3, H, W]
+            
+        elif fourth_panel_data.dim() == 3 and fourth_panel_data.shape[0] == 2:
+            baseline_val = fourth_panel_data[1] 
+            fourth_vis = baseline_val.unsqueeze(0).repeat(3, 1, 1).cpu()
+        
+        else: 
+            fourth_vis = torch.sigmoid(fourth_panel_data).cpu().repeat(3,1,1)
+
+        fourth_vis = torch.clamp(fourth_vis, 0, 1)
+
+        # Combination: [Input | Ground Truth | Anomaly Head | Semantic Class]
+        comparison = torch.cat([img_vis, vis_t, pred_vis, fourth_vis], dim=2)
 
         # 6. Log su WandB
         try:
             if hasattr(self.logger, 'experiment') and hasattr(self.logger.experiment, 'log'):
                 from torchvision.transforms.functional import to_pil_image
-                caption = f"{prefix}_L{layer_idx}_Input_GT_NormalityHead_BaselineMSP"
+                caption = f"{prefix}_L{layer_idx}_Input_GT_AnomalyHead_SemanticClass"
                 # Convert to PIL Image to ensure robust serialization to WandB
                 pil_comparison = to_pil_image(comparison.cpu())
                 self.logger.experiment.log({
@@ -281,36 +274,28 @@ class MCS_Anomaly(MaskClassificationSemantic):
         # Debug locale (opzionale)
         if batch_idx == 0 and layer_idx == 0:
             save_image(comparison, f"debug_vis_{prefix}.png")
-        '''
+        
 
-    def _compute_baseline_msp(self, mask_logits, class_logits, origins, img_sizes):
-            """
-            Compute baseline anomaly detection using Maximum Softmax Probability (MSP)
-            from frozen class_head predictions.
+    def _apply_colormap(self, tensor_indices):
+        """
+        Converts a 2D tensor of class indices [H, W] into a 3D RGB image tensor [3, H, W]
+        using the 'tab20' colormap from Matplotlib.
+        """
+        import matplotlib.pyplot as plt
+        
+        # 1. Retrieve the colormap
+        cmap = plt.get_cmap('tab20')
+        num_colors = 20
 
-            MSP approach: Anomaly = 1 - max_prob(semantic_classes)
-            Lower confidence on semantic classes → Higher anomaly score
-            """
-            # Get semantic probabilities from frozen class_head [B, Q, 20]
-            semantic_probs = F.softmax(class_logits, dim=-1)
-
-            # Max probability across 19 semantic classes (exclude void class at index 19)
-            max_semantic_prob, _ = semantic_probs[..., :-1].max(dim=-1)  # [B, Q]
-
-            # MSP anomaly score: Low semantic confidence = High anomaly
-            # Create binary classification: [Normal, Anomaly]
-            baseline_probs = torch.stack([
-                max_semantic_prob,           # Normal (high semantic confidence)
-                1.0 - max_semantic_prob      # Anomaly (low semantic confidence)
-            ], dim=-1)  # [B, Q, 2]
-
-            # Combine with masks same as anomaly head
-            crop_logits = torch.einsum(
-                "bqhw, bqc -> bchw",
-                mask_logits.sigmoid(),
-                baseline_probs
-            )
-
-            # Revert windowing
-            logits = self.revert_window_logits_semantic(crop_logits, origins, img_sizes)
-            return logits
+        # 2. Create a palette tensor
+        palette = torch.tensor(
+            [cmap(i)[:3] for i in range(num_colors)], 
+            device=tensor_indices.device
+        )
+        
+        # 3. Apply the palette using advanced indexing
+        colored_img = palette[tensor_indices.long()]
+        
+        # 4. Permute dimensions to match PyTorch standard (Channels First)
+        # Transformation: [H, W, 3] -> [3, H, W]
+        return colored_img.permute(2, 0, 1)

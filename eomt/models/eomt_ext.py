@@ -38,11 +38,10 @@ class EoMT_EXT(nn.Module):
         self.class_head = nn.Linear(self.encoder.backbone.embed_dim, num_classes + 1)
 
         # ANOMALY HEAD: Predicts [Normal, Anomaly, No_Object]
-        # Input: [query_emb (C)] + [entropy (1)] + [max_prob (1)]
-        # UPGRADE: MLP allows learning non-linear interactions between semantics and uncertainty
+        # Input: [query_emb (C)]
         internal_anomaly_layers = self.encoder.backbone.embed_dim // 2
         self.anomaly_head = nn.Sequential(
-            nn.Linear(self.encoder.backbone.embed_dim + 2, internal_anomaly_layers),
+            nn.Linear(self.encoder.backbone.embed_dim, internal_anomaly_layers),
             nn.GELU(),
             nn.Linear(internal_anomaly_layers, 3)
         )
@@ -69,19 +68,8 @@ class EoMT_EXT(nn.Module):
 
         class_logits = self.class_head(q)
 
-        # --- Uncertainty Injection ---
-        # Calculate Entropy and Max Prob from the *frozen* class head predictions
-        probs = F.softmax(class_logits, dim=-1)
-        log_probs = F.log_softmax(class_logits, dim=-1)
-        entropy = -torch.sum(probs * log_probs, dim=-1, keepdim=True)  # [B, Q, 1]
-        max_prob, _ = torch.max(probs, dim=-1, keepdim=True)           # [B, Q, 1]
-
-        # stop_gradient just in case, though class_head is frozen in training loop usually
-        uncertainty_feats = torch.cat([entropy, max_prob], dim=-1).detach()
-
-        # Inject into normality head
-        q_enriched = torch.cat([q, uncertainty_feats], dim=-1)
-        normality_score = self.anomaly_head(q_enriched)
+        # Inject into normality head, only queries 
+        normality_score = self.anomaly_head(q)
 
         x = x[:, self.num_q + self.encoder.backbone.num_prefix_tokens :, :]
         x = x.transpose(1, 2).reshape(
