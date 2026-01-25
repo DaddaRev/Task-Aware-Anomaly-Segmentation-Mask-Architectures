@@ -1,5 +1,13 @@
 trainer:
   max_epochs: 10
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        dirpath: ./final_model_anomaly
+        filename: "final_model_epoch_{epoch:02d}"
+        save_top_k: 0  # Don't save intermediate checkpoints
+        save_last: true  # Only save the final checkpoint
+        save_on_train_epoch_end: true
   logger:
     class_path: lightning.pytorch.loggers.wandb.WandbLogger
     init_args:
