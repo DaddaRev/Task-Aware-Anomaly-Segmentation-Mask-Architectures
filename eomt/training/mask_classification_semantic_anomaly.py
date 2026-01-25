@@ -208,6 +208,7 @@ class MCS_Anomaly(MaskClassificationSemantic):
                     log_prefix, i, batch_idx
                 )
 
+    @torch.compiler.disable
     def plot_semantic_new(self, img, target, logits, fourth_panel_data, prefix, layer_idx, batch_idx):
         import wandb
 
@@ -275,7 +276,7 @@ class MCS_Anomaly(MaskClassificationSemantic):
         if batch_idx == 0 and layer_idx == 0:
             save_image(comparison, f"debug_vis_{prefix}.png")
         
-
+    @torch.compiler.disable
     def _apply_colormap(self, tensor_indices):
         """
         Converts a 2D tensor of class indices [H, W] into a 3D RGB image tensor [3, H, W]
@@ -289,12 +290,11 @@ class MCS_Anomaly(MaskClassificationSemantic):
 
         # 2. Create a palette tensor
         palette = torch.tensor(
-            [cmap(i)[:3] for i in range(num_colors)], 
-            device=tensor_indices.device
-        )
+            [cmap(i)[:3] for i in range(num_colors)], dtype=torch.float32
+        ).to(tensor_indices.device)
         
         # 3. Apply the palette using advanced indexing
-        colored_img = palette[tensor_indices.long()]
+        colored_img = palette[tensor_indices.long().clamp(0, num_colors - 1)]
         
         # 4. Permute dimensions to match PyTorch standard (Channels First)
         # Transformation: [H, W, 3] -> [3, H, W]
