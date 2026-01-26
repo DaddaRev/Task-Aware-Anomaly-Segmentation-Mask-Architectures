@@ -1,15 +1,14 @@
-import yaml
 from typing import Any
 from pathlib import Path
 from dataclasses import dataclass
 
-from cityscapes_coco_anomaly.synthgen.utils import (CityscapesPaths,
+from cityscapes_coco_anomaly.synthgen.utils import (read_yaml,
+                                                    CityscapesPaths,
                                                     CocoPaths,
                                                     resolve_cityscapes_paths,
                                                     resolve_coco_paths)
 
-from cityscapes_coco_anomaly.synthgen.tools.download_coco import download_coco
-from cityscapes_coco_anomaly.synthgen.tools.download_cityscapes import download_cityscapes
+from cityscapes_coco_anomaly.synthgen.tools import download_coco, download_cityscapes
 
 
 @dataclass(frozen=True)
@@ -46,11 +45,6 @@ class AppConfig:
     raw: dict[str, Any]
 
 
-def _read_yaml(path: Path) -> dict[str, Any]:
-    with open(path, "r") as f:
-        return yaml.safe_load(f)
-
-
 def _validate_split_ratios(split_name: str, cfg: dict[str, Any]) -> dict[str, float]:
 
     if not isinstance(cfg, dict):
@@ -69,7 +63,7 @@ def _validate_split_ratios(split_name: str, cfg: dict[str, Any]) -> dict[str, fl
     return {"clean_ratio": clean, "synth_ratio": synth}
 
 
-def prepare_datasets(cfg: dict[str, Any], *, force: bool = False) -> None:
+def prepare_datasets(cfg: dict[str, Any], *, force: bool = False):
     """
     If enabled in YAML under `datasets.*.download.enabled`, download datasets
     """
@@ -108,7 +102,7 @@ def load_config(config_path: str | Path, get_datasets: bool = False, force_downl
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
-    cfg = _read_yaml(config_path)
+    cfg = read_yaml(config_path)
 
     # dataset
     dataset_cfg = cfg["dataset"]

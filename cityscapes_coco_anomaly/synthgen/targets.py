@@ -23,14 +23,6 @@ class TargetsConfig:
     anomaly_label: int = 0  # single-class anomaly
 
 
-def init_gt_pixel(H: int, W: int, normal_value: int = 0) -> np.ndarray:
-    """
-    Initialize a clean ground-truth pixel map.
-    """
-    gt = np.full((H, W), int(normal_value), dtype=np.uint8)
-    return gt
-
-
 def apply_anomaly_alpha_to_gt_pixel(
         gt_pixel: np.ndarray,
         alpha_full: np.ndarray,
@@ -81,11 +73,11 @@ def add_instance_target_from_alpha(
         raise ValueError(f"alpha_full must be HxW, got {alpha_full.shape}")
 
     m = (alpha_full > 0.5)
-    if np.count_nonzero(m) == 0:
+    if not np.count_nonzero(m):
         return
 
     masks.append(m)
-    labels.append(int(cfg.anomaly_label))
+    labels.append(cfg.anomaly_label)
 
 
 def merge_alphas_to_gt_and_instances(
@@ -101,7 +93,8 @@ def merge_alphas_to_gt_and_instances(
     - labels list (0 per instance)
     """
 
-    gt = init_gt_pixel(H, W, normal_value=cfg.normal_pixel_value)
+    # Initialize a clean ground-truth pixel map
+    gt = np.full((H, W), cfg.normal_pixel_value, dtype=np.uint8)
     masks, labels = [], []
 
     for a in alphas_full:

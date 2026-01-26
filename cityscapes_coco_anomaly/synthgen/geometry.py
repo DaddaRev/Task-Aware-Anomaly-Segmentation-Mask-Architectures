@@ -27,19 +27,19 @@ class PatchGeom:
 def parse_geometry_cfg(synthesis_cfg: dict[str, Any]) -> GeometryConfig:
     geo = synthesis_cfg.get("geometry", {})
 
-    scale_min = float(geo.get("scale_min", 1.0))
-    scale_max = float(geo.get("scale_max", 1.0))
+    scale_min = geo.get("scale_min", 1.0)
+    scale_max = geo.get("scale_max", 1.0)
 
     if scale_min <= 0 or scale_max <= 0 or scale_max < scale_min:
         raise ValueError(f"Invalid scale range: scale_min={scale_min}, scale_max={scale_max}")
 
-    final_area_ratio_min = float(geo.get("final_area_ratio_min", 0.0))
-    final_area_ratio_max = float(geo.get("final_area_ratio_max", 1e9))
+    final_area_ratio_min = geo.get("final_area_ratio_min", 0.0)
+    final_area_ratio_max = geo.get("final_area_ratio_max", 1e9)
 
     if final_area_ratio_min < 0 or final_area_ratio_max < 0 or final_area_ratio_max < final_area_ratio_min:
         raise ValueError(f"Invalid final_area_ratio range: min={final_area_ratio_min}, max={final_area_ratio_max}")
 
-    random_horizontal_flip = bool(geo.get("random_horizontal_flip", False))
+    random_horizontal_flip = geo.get("random_horizontal_flip", False)
 
     return GeometryConfig(
         scale_min=scale_min,
@@ -55,10 +55,10 @@ def scale_from_y(y_center: float, H: int, scale_min: float, scale_max: float) ->
     y_center: pixel coordinate (0..H-1)
     """
     if H <= 1:
-        return float(scale_min)
+        return scale_min
 
     t = float(np.clip(y_center / float(H - 1), 0.0, 1.0))
-    return float(scale_min + (scale_max - scale_min) * t)
+    return scale_min + (scale_max - scale_min) * t
 
 
 def _resize_rgb_alpha(
@@ -84,7 +84,7 @@ def _resize_rgb_alpha(
         raise ValueError("alpha must be in [0,1]")
 
     a_res = cv2.resize(alpha, (out_w, out_h), interpolation=cv2.INTER_NEAREST)
-    a_res = np.clip(a_res, 0.0, 1.0).astype(np.float32)
+    a_res = np.clip(a_res, 0.0, 1.0)
     return rgb, a_res
 
 
@@ -97,6 +97,7 @@ def area_ratio_ok(out_w: int, out_h: int, city_H: int, city_W: int, min_r: float
 
     if img_area <= 0:
         return False
+
     r = float(out_w * out_h) / img_area
 
     return min_r <= r <= max_r

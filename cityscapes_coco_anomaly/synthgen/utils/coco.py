@@ -3,7 +3,7 @@ from typing import Any
 from pathlib import Path
 from pycocotools import mask as mask_utils
 
-from ..schemas.coco import CocoPaths
+from cityscapes_coco_anomaly.synthgen.schemas import CocoPaths
 
 
 def resolve_coco_paths(cfg_coco: dict[str, Any]) -> CocoPaths:
@@ -17,14 +17,6 @@ def resolve_coco_paths(cfg_coco: dict[str, Any]) -> CocoPaths:
         instances_train_json=root / ann["instances_train"])
 
     return paths
-
-
-def coco_image_path(images_root: Path, file_name: str) -> Path:
-    """
-    COCO images are addressed by file_name from the images[] entries in the annotation JSON
-    """
-    p = images_root / file_name
-    return p
 
 
 def decode_coco_segmentation_to_mask(segmentation: Any, height: int, width: int) -> np.ndarray:

@@ -2,23 +2,22 @@ import numpy as np
 from typing import Any
 
 from cityscapes_coco_anomaly.synthgen.config import AppConfig
-from cityscapes_coco_anomaly.synthgen.utils.io import derive_sample_seed
-from cityscapes_coco_anomaly.synthgen.schemas.cityscapes import SampleDecision
-from cityscapes_coco_anomaly.synthgen.schemas.coco import CocoInstance, CocoIndex
+from cityscapes_coco_anomaly.synthgen.utils import derive_sample_seed
+from cityscapes_coco_anomaly.synthgen.schemas import SampleDecision,CocoInstance, CocoIndex
 
 
 def _get_split_ratios(cfg: AppConfig, split: str) -> tuple[float, float]:
-    split = split.lower()
-    d = getattr(cfg.splits, split)
 
-    return float(d["clean_ratio"]), float(d["synth_ratio"])
+    d = getattr(cfg.splits, split.lower())
+
+    return d["clean_ratio"], d["synth_ratio"]
 
 
 def _get_instances_range(syn: dict[str, Any]) -> tuple[int, int]:
     inst = syn.get("instances_per_image", {})
 
-    mn = int(inst.get("min", 1))
-    mx = int(inst.get("max", 1))
+    mn = inst.get("min", 1)
+    mx = inst.get("max", 1)
 
     if mn < 0 or mx < 0 or mx < mn:
         raise ValueError(f"Invalid instances_per_image range: min={mn}, max={mx}")
@@ -81,7 +80,7 @@ def sample_n_instances(rng: np.random.Generator, n_min: int, n_max: int) -> int:
 def sample_target_label(rng: np.random.Generator, labels_with_prob: list[tuple[str, float]]) -> str:
     labels = [x[0] for x in labels_with_prob]
     probs = [x[1] for x in labels_with_prob]
-    return str(rng.choice(labels, p=probs))
+    return rng.choice(labels, p=probs)
 
 
 def sample_coco_instance(rng: np.random.Generator, coco_index: CocoIndex) -> CocoInstance:
@@ -109,7 +108,7 @@ def build_sample_decision(
     _, synth_ratio = _get_split_ratios(cfg, split)
     syn = cfg.synthesis
 
-    p_has_anomaly = float(syn.get("p_hash_anomaly", 1.0))
+    p_has_anomaly = syn.get("p_hash_anomaly", 1.0)
     n_min, n_max = _get_instances_range(syn)
     targets = _get_target_labels_with_weights(syn)
 
@@ -125,8 +124,8 @@ def build_sample_decision(
             is_synth=False,
             has_anomaly=False,
             n_instances=0,
-            target_labels=tuple(),
-            coco_instances=tuple(),
+            target_labels=(),
+            coco_instances=(),
             seed=seed)
 
     # synth sample: decide if we actually insert anomalies
@@ -137,8 +136,8 @@ def build_sample_decision(
             is_synth=True,
             has_anomaly=False,
             n_instances=0,
-            target_labels=tuple(),
-            coco_instances=tuple(),
+            target_labels=(),
+            coco_instances=(),
             seed=seed)
 
     n_inst = sample_n_instances(rng, n_min, n_max)

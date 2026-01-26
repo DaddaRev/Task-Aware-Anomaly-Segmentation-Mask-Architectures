@@ -4,10 +4,12 @@ import numpy as np
 from typing import Any
 from pathlib import Path
 
-from .utils.io import ensure_split_output_dirs
+from cityscapes_coco_anomaly.synthgen.utils import ensure_split_output_dirs
 
 
 def write_rgb_png(path: Path, rgb: np.ndarray):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    
     if rgb.dtype != np.uint8 or rgb.ndim != 3 or rgb.shape[2] != 3:
         raise ValueError("RGB image must be uint8 HxWx3")
 
@@ -66,9 +68,9 @@ def export_sample(
     masks_cfg = export_cfg.get("masks", {})
     labels_cfg = export_cfg.get("labels", {})
 
-    gt_enabled = bool(gt_cfg.get("enabled", True))
-    masks_enabled = bool(masks_cfg.get("enabled", True))
-    labels_enabled = bool(labels_cfg.get("enabled", True))
+    gt_enabled = gt_cfg.get("enabled", True)
+    masks_enabled = masks_cfg.get("enabled", True)
+    labels_enabled = labels_cfg.get("enabled", True)
 
     dirs = ensure_split_output_dirs(output_root, split)
 
@@ -112,7 +114,7 @@ def append_manifest_line(
     """
 
     man = export_cfg.get("manifest", {})
-    enabled = bool(man.get("enabled", True))
+    enabled = man.get("enabled", True)
     if not enabled:
         return
 

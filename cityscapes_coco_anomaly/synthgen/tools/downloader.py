@@ -5,11 +5,6 @@ from pathlib import Path
 from typing import Optional
 
 
-def require_exists(p: Path, what: str = "path") -> None:
-    if not p.exists():
-        raise FileNotFoundError(f"Missing {what}: {p}")
-
-
 def download_file(
         url: str,
         dst: Path,

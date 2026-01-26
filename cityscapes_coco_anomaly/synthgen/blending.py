@@ -23,23 +23,21 @@ class BlendingConfig:
 def parse_blending_cfg(synthesis_cfg: dict[str, Any]) -> BlendingConfig:
     b = synthesis_cfg.get("blending", {})
 
-    feather_px = int(b.get("feather_px", 0))
-    if feather_px < 0:
+    if (feather_px := b.get("feather_px", 0)) < 0:
         raise ValueError("blending.feather_px must be >= 0")
 
     pm = b.get("photometric_match", {})
 
-    enabled = bool(pm.get("enabled", True))
-    space = str(pm.get("space", "lab")).lower()
+    enabled = pm.get("enabled", True)
+    space = pm.get("space", "lab").lower()
 
     if space not in {"lab", "rgb"}:
         raise ValueError("photometric_match.space must be 'lab' or 'rgb'")
 
-    match_mean = bool(pm.get("match_mean", True))
-    match_std = bool(pm.get("match_std", True))
-    eps = float(pm.get("eps", 1e-6))
+    match_mean = pm.get("match_mean", True)
+    match_std = pm.get("match_std", True)
 
-    if eps <= 0:
+    if (eps :=pm.get("eps", 1e-6)) <= 0:
         raise ValueError("photometric_match.eps must be > 0")
 
     photometric = PhotometricMatchConfig(
@@ -49,7 +47,7 @@ def parse_blending_cfg(synthesis_cfg: dict[str, Any]) -> BlendingConfig:
         match_std=match_std,
         eps=eps)
 
-    alpha_composite = bool(b.get("alpha_composite", True))
+    alpha_composite = b.get("alpha_composite", True)
 
     return BlendingConfig(feather_px=feather_px, photometric=photometric, alpha_composite=alpha_composite)
 
@@ -121,18 +119,16 @@ def photometric_match_patch(
         bg = bg_rgb.astype(np.float32)
 
     out = patch.copy()
-    eps = float(cfg.eps)
+    eps = cfg.eps
 
     for c in range(3):
         p = patch[..., c]
         b = bg[..., c]
 
-        p_mean = float(p.mean())
-        b_mean = float(b.mean())
+        p_mean, b_mean = p.mean(), b.mean()
 
         if cfg.match_std:
-            p_std = float(p.std())
-            b_std = float(b.std())
+            p_std, b_std = p.std(), b.std()
             scale = b_std / (p_std + eps)
         else:
             scale = 1.0
@@ -145,10 +141,7 @@ def photometric_match_patch(
         out[..., c] = p * scale + shift
 
     # Convert back
-    if cfg.space == "lab":
-        return _lab_to_rgb(out)
-    else:
-        return np.clip(out, 0, 255).astype(np.uint8)
+    return _lab_to_rgb(out) if cfg.space == "lab" else np.clip(out, 0, 255).astype(np.uint8)
 
 
 def alpha_composite(bg_rgb: np.ndarray, patch_rgb: np.ndarray, alpha: np.ndarray) -> np.ndarray:
@@ -209,10 +202,7 @@ def blend_patch_into_image(
     bg_region = city_rgb[y:y + ph, x:x + pw]
     patch_matched = photometric_match_patch(patch_rgb, bg_region, cfg.photometric)
 
-    if cfg.alpha_composite:
-        blended_region = alpha_composite(bg_region, patch_matched, a)
-    else:
-        blended_region = patch_matched
+    blended_region = alpha_composite(bg_region, patch_matched, a) if cfg.alpha_composite else patch_matched
 
     out = city_rgb.copy()
     out[y:y + ph, x:x + pw] = blended_region

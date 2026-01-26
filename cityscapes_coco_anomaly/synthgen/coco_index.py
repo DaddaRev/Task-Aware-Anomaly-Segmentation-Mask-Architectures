@@ -3,9 +3,8 @@ import numpy as np
 from typing import Any
 from pathlib import Path
 
-from .utils.io import read_json, read_image_rgb
-from .utils.coco import decode_coco_segmentation_to_mask
-from .schemas.coco import CocoInstance, CocoIndex, CocoImageInfo
+from cityscapes_coco_anomaly.synthgen.utils import read_json, read_image_rgb, decode_coco_segmentation_to_mask
+from cityscapes_coco_anomaly.synthgen.schemas import CocoInstance, CocoIndex, CocoImageInfo
 
 
 def _bbox_aspect_ratio(bbox_xywh: tuple[float, float, float, float]) -> float:

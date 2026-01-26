@@ -15,12 +15,11 @@ class QualityConfig:
 def parse_quality_cfg(synthesis_cfg: dict[str, Any]) -> QualityConfig:
     cs = synthesis_cfg.get("cityscapes", {})
 
-    min_cov = float(cs.get("min_target_label_coverage", 0.0))
+    min_cov = cs.get("min_target_label_coverage", 0.0)
     if not (0.0 <= min_cov <= 1.0):
         raise ValueError("min_target_label_coverage must be in [0,1]")
 
-    forbidden = cs.get("forbidden_overlap_labels", [])
-    if forbidden is None:
+    if (forbidden := cs.get("forbidden_overlap_labels", [])) is None:
         forbidden = []
 
     forbidden = tuple(str(x) for x in forbidden)
@@ -29,7 +28,7 @@ def parse_quality_cfg(synthesis_cfg: dict[str, Any]) -> QualityConfig:
 
     reject_border = bool(q.get("reject_if_touches_image_border", True))
 
-    max_loc = int(synthesis_cfg.get("max_location_attempts", 50))
+    max_loc = synthesis_cfg.get("max_location_attempts", 50)
     if max_loc <= 0:
         raise ValueError("max_location_attempts must be > 0")
 
@@ -49,6 +48,7 @@ def target_label_coverage_ok(
         x: int, y: int, w: int, h: int,
         target_id: int,
         min_cov: float) -> bool:
+
     patch = sem_trainids[y:y + h, x:x + w]
     if patch.size == 0:
         return False
@@ -65,7 +65,7 @@ def forbidden_overlap_ok(sem_trainids: np.ndarray,
         return True
     patch = sem_trainids[y:y + h, x:x + w]
 
-    if patch.size == 0:
+    if not patch.size:
         return False
 
     return not np.isin(patch, list(forbidden_ids)).any()
@@ -102,15 +102,13 @@ def sample_paste_location(
     """
 
     H, W = sem_trainids.shape[:2]
-    target_id = name_to_trainid.get(target_label_name, None)
 
-    if target_id is None:
+    if (target_id := name_to_trainid.get(target_label_name, None)) is None:
         raise KeyError(f"Unknown target label name: {target_label_name}")
 
     forbidden_ids: set[int] = set()
     for name in cfg.forbidden_overlap_labels:
-        tid = name_to_trainid.get(name, None)
-        if tid is not None:
+        if (tid := name_to_trainid.get(name, None)) is not None:
             forbidden_ids.add(tid)
 
     for _ in range(cfg.max_location_attempts):

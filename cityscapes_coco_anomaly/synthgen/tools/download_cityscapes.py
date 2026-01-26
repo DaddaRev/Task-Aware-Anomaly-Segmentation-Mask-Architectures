@@ -1,7 +1,6 @@
 import requests
 from pathlib import Path
-
-from cityscapes_coco_anomaly.synthgen.tools.downloader import download_file
+from cityscapes_coco_anomaly.synthgen.tools import download_file
 
 
 def download_cityscapes(root: str | Path, *, force: bool = False) -> Path:

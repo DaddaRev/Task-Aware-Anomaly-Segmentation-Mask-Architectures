@@ -4,14 +4,15 @@ import numpy as np
 from pathlib import Path
 
 from cityscapes_coco_anomaly.synthgen.config import load_config, AppConfig
-from cityscapes_coco_anomaly.synthgen.utils.cityscapes import name_to_trainid_map
-from cityscapes_coco_anomaly.synthgen.utils.coco import decode_coco_segmentation_to_mask
+from cityscapes_coco_anomaly.synthgen.sampler import build_sample_decision, make_rng_for_sample
+from cityscapes_coco_anomaly.synthgen.utils import name_to_trainid_map, decode_coco_segmentation_to_mask
 from cityscapes_coco_anomaly.synthgen.cityscapes_index import build_cityscapes_index, iter_cityscapes_pairs
 from cityscapes_coco_anomaly.synthgen.coco_index import build_coco_index, CocoIndex, load_coco_image_by_id
-from cityscapes_coco_anomaly.synthgen.sampler import build_sample_decision, make_rng_for_sample
+
 from cityscapes_coco_anomaly.synthgen.geometry import (parse_geometry_cfg,
                                                        compute_patch_geometry,
                                                        apply_geometry_to_patch)
+
 from cityscapes_coco_anomaly.synthgen.blending import parse_blending_cfg, blend_patch_into_image
 from cityscapes_coco_anomaly.synthgen.quality import parse_quality_cfg, sample_paste_location
 from cityscapes_coco_anomaly.synthgen.targets import TargetsConfig, merge_alphas_to_gt_and_instances
@@ -77,9 +78,9 @@ def build_split(cfg: AppConfig, split: str, coco_index: CocoIndex):
     values = (gt_cfg.get("values", {}) if isinstance(gt_cfg, dict) else {})
 
     tcfg = TargetsConfig(
-        normal_pixel_value=int(values.get("normal", 0)),
-        anomaly_pixel_value=int(values.get("anomaly", 1)),
-        ignore_pixel_value=int(values.get("ignore", 255)))
+        normal_pixel_value=values.get("normal", 0),
+        anomaly_pixel_value=values.get("anomaly", 1),
+        ignore_pixel_value=values.get("ignore", 255))
 
     n_total = 0
     n_synth = 0
@@ -93,7 +94,7 @@ def build_split(cfg: AppConfig, split: str, coco_index: CocoIndex):
         decision = build_sample_decision(cfg, split, city_id, coco_index)
 
         # clean or synth-without-anomaly: just export empty targets
-        if (not decision.is_synth) or (not decision.has_anomaly) or decision.n_instances == 0:
+        if (not decision.is_synth) or (not decision.has_anomaly) or not decision.n_instances:
             H, W = city_rgb.shape[:2]
             gt_pixel, masks, labels = merge_alphas_to_gt_and_instances(H, W, [], tcfg)
 
@@ -105,18 +106,18 @@ def build_split(cfg: AppConfig, split: str, coco_index: CocoIndex):
                 gt_pixel=gt_pixel,
                 masks=masks,
                 labels=labels,
-                export_cfg=export_cfg,
-            )
+                export_cfg=export_cfg)
 
             record = {
                 "split": split,
                 "city_id": city_id,
-                "is_synth": bool(decision.is_synth),
+                "is_synth": decision.is_synth,
                 "has_anomaly": False,
                 "n_instances": 0,
-                "seed": int(decision.seed),
+                "seed": decision.seed,
                 "outputs": rel,
             }
+
             append_manifest_line(cfg.dataset.output_root, record, export_cfg=export_cfg)
             continue
 
@@ -185,8 +186,7 @@ def build_split(cfg: AppConfig, split: str, coco_index: CocoIndex):
             alpha_full_list.append(alpha_full)
             placed += 1
 
-        has_anom = placed > 0
-        if has_anom:
+        if has_anom := placed > 0:
             n_anom += 1
 
         # Targets (union + per-instance)
@@ -206,12 +206,12 @@ def build_split(cfg: AppConfig, split: str, coco_index: CocoIndex):
             "split": split,
             "city_id": city_id,
             "is_synth": True,
-            "has_anomaly": bool(has_anom),
-            "planned_instances": int(decision.n_instances),
-            "placed_instances": int(placed),
-            "seed": int(decision.seed),
-            "target_labels": list(decision.target_labels),
-            "coco_ann_ids": [int(ci.ann_id) for ci in decision.coco_instances],
+            "has_anomaly": has_anom,
+            "planned_instances": decision.n_instances,
+            "placed_instances": placed,
+            "seed": decision.seed,
+            "target_labels": decision.target_labels,
+            "coco_ann_ids": [ci.ann_id for ci in decision.coco_instances],
             "outputs": rel,
         }
 
@@ -264,7 +264,7 @@ def main():
     coco_cfg = cfg.synthesis.get("coco", {})
 
     allowed_categories = coco_cfg.get("allowed_categories", [])
-    if not isinstance(allowed_categories, list) or len(allowed_categories) == 0:
+    if not isinstance(allowed_categories, list) or not len(allowed_categories):
         raise ValueError("synthesis.coco.allowed_categories must be a non-empty list")
 
     instance_filters = coco_cfg.get("instance_filters", {})
@@ -274,7 +274,7 @@ def main():
     t0 = time.perf_counter()
     coco_index = build_coco_index(
         coco_instances_json=cfg.paths_coco.instances_train_json,
-        allowed_categories=[str(x) for x in allowed_categories],
+        allowed_categories=[x for x in allowed_categories],
         instance_filters=instance_filters)
 
     if (dt := time.perf_counter() - t0) < 60:

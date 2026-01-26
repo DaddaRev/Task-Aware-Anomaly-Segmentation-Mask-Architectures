@@ -1,7 +1,7 @@
 import cv2
 import json
+import yaml
 import hashlib
-
 import numpy as np
 from typing import Any
 from pathlib import Path
@@ -10,6 +10,11 @@ from pathlib import Path
 def ensure_exists(p: Path, what: str) -> None:
     if not p.exists():
         raise FileNotFoundError(f"{what} not found: {p}")
+
+
+def read_yaml(path: Path) -> dict[str, Any]:
+    with open(path, "r") as f:
+        return yaml.safe_load(f)
 
 
 def read_json(path: Path) -> Any:

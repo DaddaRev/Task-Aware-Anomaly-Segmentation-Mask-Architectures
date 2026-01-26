@@ -2,7 +2,8 @@ import argparse
 from pathlib import Path
 from dataclasses import dataclass
 
-from .downloader import download_file, extract_zip, require_exists
+from cityscapes_coco_anomaly.synthgen.utils import ensure_exists
+from cityscapes_coco_anomaly.synthgen.tools import download_file, extract_zip
 
 COCO_TRAIN2017_URL = "http://images.cocodataset.org/zips/train2017.zip"
 COCO_ANN_TRAINVAL2017_URL = "http://images.cocodataset.org/annotations/annotations_trainval2017.zip"
@@ -62,10 +63,10 @@ def download_coco(root: str | Path, *, force: bool = False) -> CocoLayout:
         print(f"Extracting {layout.ann_zip.name} -> {layout.root}")
         extract_zip(layout.ann_zip, layout.root)
 
-    require_exists(layout.images_dir)
+    ensure_exists(layout.images_dir, "COCO train2017 images dir")
     if not any(layout.images_dir.glob("*.jpg")):
         raise RuntimeError(f"COCO images dir exists but contains no jpg: {layout.images_dir}")
-    require_exists(layout.instances_json, "COCO instances_train2017.json")
+    ensure_exists(layout.instances_json, "COCO instances_train2017.json")
 
     print("COCO download complete.")
     print(f"Images: {layout.images_dir}")
