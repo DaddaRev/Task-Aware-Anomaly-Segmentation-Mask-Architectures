@@ -24,15 +24,15 @@ model:
     # attn_mask_annealing_end_steps: ...
 
     # Learning parameters (important for fine-tuning)
-    lr: 5.0e-4  # Low LR to preserve semantic knowledge
-    weight_decay: 0.05
+    lr: 5.0e-5  # from 5.0e-4
+    weight_decay: 0.1  # from 0.05
     poly_power: 0.9
-    warmup_steps: [100, 200]  # Reduced for small dataset (80 samples)
+    warmup_steps: [25, 50]  # Reduced for small dataset (from [100, 200])
 
     # Loss coefficients
     mask_coefficient: 4.0
     dice_coefficient: 4.0
-    class_coefficient: 2.0
+    class_coefficient: 3.0   #from 2.0
 
     # Checkpoint loading (CRITICAL!)
     ckpt_path: null  # Will be passed via CLI --model.ckpt_path
