@@ -30,9 +30,9 @@ model:
     warmup_steps: [25, 50]  # Reduced for small dataset (from [100, 200])
 
     # Loss coefficients
-    mask_coefficient: 4.0
-    dice_coefficient: 4.0
-    class_coefficient: 3.0   #from 2.0
+    mask_coefficient: 2.0 # from 4.0
+    dice_coefficient: 2.0 # from 4.0
+    class_coefficient: 10.0  #from 3.0
 
     # Checkpoint loading (CRITICAL!)
     ckpt_path: null  # Will be passed via CLI --model.ckpt_path
