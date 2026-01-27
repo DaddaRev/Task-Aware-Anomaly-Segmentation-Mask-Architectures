@@ -1,193 +1,68 @@
-dataset:
-  name: cs_coco_anom_v1
-  seed: 32323232 # il voto che mi aspetto, per ognuno del team
-  output_root: ../data/synth/cs_coco_anom_v1
+trainer:
+  max_epochs: 25
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        dirpath: ./final_model_anomaly
+        filename: "final_model_epoch_{epoch:02d}"
+        save_top_k: 0  # Don't save intermediate checkpoints
+        save_last: true  # Only save the final checkpoint
+        save_on_train_epoch_end: true
+  logger:
+    class_path: lightning.pytorch.loggers.wandb.WandbLogger
+    init_args:
+      resume: allow
+      project: "eomt"
+      name: "anomaly_ext_eomt_base_640"
+model:
+  class_path: training.mask_classification_semantic_anomaly.MCS_Anomaly
+  init_args:
+    num_classes: 2
+    attn_mask_annealing_enabled: False
+    # Steps removed as they were out of range for short training
+    # attn_mask_annealing_start_steps: ...
+    # attn_mask_annealing_end_steps: ...
 
-datasets:
-  cityscapes:
-    root: ../data/raw/cityscapes
+    # Learning parameters (important for fine-tuning)
+    lr: 1.0e-4  # from 5.0e-4
+    weight_decay: 0.1  # from 0.05
+    poly_power: 0.9
+    warmup_steps: [200, 500]  # Reduced for small dataset (from [100, 200])
 
-    download:
-      enabled: true
+    # Loss coefficients
+    mask_coefficient: 5.0
+    dice_coefficient: 4.0
+    class_coefficient: 3.0  #from 3.0
 
-    images:
-      train: leftImg8bit/train
-      val: leftImg8bit/val
-      test: leftImg8bit/test
+    # Checkpoint loading (CRITICAL!)
+    ckpt_path: null  # Will be passed via CLI --model.ckpt_path
+    load_ckpt_class_head: true  # Load frozen class_head for prototypes
+    delta_weights: false
 
-    semantics:
-      train: gtFine/train
-      val: gtFine/val
-      test: gtFine/test
-
-  coco:
-    root: ../data/raw/coco
-
-    download:
-      enabled: true
-
-      images:
-        train:
-          url: http://images.cocodataset.org/zips/train2017.zip
-          archive: train2017.zip
-          extract_dir: train2017
-
-      annotations:
-        instances_train:
-          url: http://images.cocodataset.org/annotations/annotations_trainval2017.zip
-          archive: annotations_trainval2017.zip
-          extract_dir: annotations
-          file: annotations/instances_train2017.json
-
-    images:
-      train: train2017
-
-    annotations:
-      instances_train: annotations/instances_train2017.json
-
-splits:
-  train:
-    clean_ratio: 0.06
-    synth_ratio: 0.94
-  val:
-    clean_ratio: 0.00
-    synth_ratio: 1.00
-  test:
-    clean_ratio: 0.00
-    synth_ratio: 1.00
-
-synthesis:
-  # percentuale di immagini sintetiche che contengono almeno 1 anomalia
-  p_has_anomaly: 1.00
-
-  # quante istanze per immagine, se has_anomaly=True
-  instances_per_image:
-    min: 1
-    max: 2
-
-  # massimo tentativi per trovare una composizione valida (per immagine e per istanza)
-  max_image_attempts: 100
-  max_instance_attempts: 100
-  max_location_attempts: 50
-
-  coco:
-    # categorie COCO ammesse come anomalie
-    allowed_categories:
-      # animals
-      - dog
-      - cat
-      - horse
-      - cow
-      - sheep
-      - bear
-      - zebra
-      - giraffe
-      # furniture
-      - chair
-      - couch
-      - bed
-      - dining table
-      # appliances
-      - microwave
-      - refrigerator
-      - toaster
-      # food
-      - banana
-      - apple
-      - sandwich
-      # personal items / debris
-      - backpack
-      - umbrella
-      - handbag
-      - suitcase
-      - sports ball
-      - bottle
-
-    # filtri qualità istanza
-    instance_filters:
-      # bbox interamente dentro l'immagine COCO
-      require_fully_visible: true
-      # rapporto w/h (evita maschere troppo sottili)
-      # AMPLIATO: 0.15-6.00 per permettere bottiglie/ombrelli
-      aspect_ratio_min: 0.15
-      aspect_ratio_max: 6.00
-      # area istanza rispetto all'immagine COCO (oggetti troppo piccoli/grandi)
-      area_ratio_min: 0.002
-      area_ratio_max: 0.20
-      # maschera non deve essere troppo sparsa: area(mask) / area(convex_hull)
-      min_solidity: 0.20
-
-  cityscapes:
-    # target di inserimento: (label, peso)
-    target_labels:
-      - [road, 1.00]
-
-    # labels da evitare in sovrapposizione
-    forbidden_overlap_labels:
-      - person
-      - rider
-      - car
-      - truck
-      - bus
-      - train
-      - motorcycle
-      - bicycle
-      - traffic light
-      - traffic sign
-
-    # quanto l'oggetto deve stare sopra la classe scelta
-    min_target_label_coverage: 0.7
-
-  geometry:
-    # scaling prospettico in base a y
-    scale_min: 0.50
-    scale_max: 1.50
-
-    # area finale (dopo scaling) rispetto all'immagine Cityscapes
-    # 0.001 = ~2000px (approx 45x45px), visibile ma supporta oggetti piccoli
-    final_area_ratio_min: 0.05
-    final_area_ratio_max: 0.18
-
-    # se true: random horizontal flip
-    random_horizontal_flip: true
-
-  blending:
-    # feather bordo (px)
-    # 1px è meglio per oggetti piccoli (evita effetto "fantasma")
-    feather_px: 1
-
-    # photometric matching locale
-    # MANTENERE 'false' per anomalie visibili.
-    # Se true, gli oggetti assumono il colore della strada (diventano grigi/camuffati).
-    photometric_match:
-      enabled: false
-      space: lab
-      match_mean: true
-      match_std: false
-      eps: 1.0e-6
-
-    # alpha compositing
-    # out = alpha * patch + (1-alpha) * bg
-    alpha_composite: true
-
-  quality_filters:
-    # scarta se bbox finale tocca il bordo dell'immagine cityscapes
-    reject_if_touches_image_border: true
-
-export:
-  image_format: png
-  gt_pixel:
-    enabled: true
-    values:
-      normal: 0
-      anomaly: 1
-      ignore: 255
-  masks:
-    enabled: true
-    format: npy  # lista maschere boolean HxW
-  labels:
-    enabled: true
-    format: npy  # lista int
-  manifest:
-    enabled: true
-    filename: manifest.jsonl
+    network:
+      class_path: models.eomt_ext.EoMT_EXT
+      init_args:
+        num_classes: 19
+        num_q: 100
+        masked_attn_enabled: False # Force Global Attention to find anomalies
+        num_blocks: 3
+        encoder:
+          class_path: models.vit.ViT
+          init_args:
+            backbone_name: vit_base_patch14_reg4_dinov2
+data:
+  class_path: dsets.training_anomaly.GenericAnomalyDataset
+  init_args:
+    img_size: [ 1024, 1024 ]
+    batch_size: 8
+    num_workers: 4
+    val_split: 0.1  # 80% train, 20% val
+    datasets:
+      - name: CocoCity
+        root: ../../../input/cityscape-cutpaste-coco-highlighted-2/train  #To run on kaggle
+        images_dir: images
+        masks_dir: gt_pixel
+        image_glob : "*.png"
+        mask_ext: "png"
+        gt_format: binary_any_nonzero_is_ood_void255
+        skip_no_ood: true
