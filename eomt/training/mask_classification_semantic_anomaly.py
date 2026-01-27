@@ -222,32 +222,23 @@ class MCS_Anomaly(MaskClassificationSemantic):
     @torch.compiler.disable
     def plot_semantic_new(self, img, target, logits, fourth_panel_data, prefix, layer_idx, batch_idx):
         import wandb
-        import matplotlib.pyplot as plt
 
-        # 1. Immagine Input (Raw)
+        # 1. Immagine Input (Raw) - Ensure [C, H, W] in range 0-1
         if img.dtype == torch.uint8:
             img_vis = img.float() / 255.0
         else:
             img_vis = img.clone()
-            # Gestione range dinamico non standard
             if img_vis.max() > 1.1:
                 img_vis = img_vis / 255.0
         img_vis = torch.clamp(img_vis, 0, 1).cpu()
 
-        # 2. Logica di Visualizzazione Composita (RGB)
-        # logits ha shape [2, H, W] -> [Normal, Anomaly]
-        # Creiamo una mappa RGB di diagnostica
+        eps = 1e-6
         if logits.dim() == 3 and logits.shape[0] == 2:
-            normal_map = torch.clamp(logits[0], 0, 1).cpu()
-            anomaly_map = torch.clamp(logits[1], 0, 1).cpu()
-
-            # R=Anomaly, G=Normal, B=0
-            # Risultato:
-            # - Verde brillante: Zona sicura e riconosciuta
-            # - Rosso brillante: Anomalia
-            # - Giallo: Incertezza (sovrapposizione)
-            # - Nero: "No Object" (il modello ignora questa zona)
-            pred_vis = torch.stack([anomaly_map, normal_map, torch.zeros_like(anomaly_map)], dim=0)
+            # We use absolute Anomaly Mass (logits[1]) directly.
+            # This naturally   "No Object" regions (where Anomaly Mass is low).
+            score_anomaly = torch.clamp(logits[1], 0, 1).cpu()
+            score_bg = torch.clamp(logits[0], 0, 1).cpu()
+            pred_vis = torch.stack([score_anomaly, score_bg, torch.zeros_like(score_anomaly)], dim=0)
         else:
             # Fallback per compatibilità vecchia
             prob = torch.sigmoid(logits[0]) if logits.dim() == 3 else torch.sigmoid(logits)
@@ -255,56 +246,136 @@ class MCS_Anomaly(MaskClassificationSemantic):
 
         pred_vis = torch.clamp(pred_vis, 0, 1)
 
-        # 3. Ground Truth (Grigio=Void, Bianco=Anomaly, Nero=Normal)
+        # Ground Truth - Anomaly=1 -> White, Background=0 -> Black, Void=255 -> Gray
         target_vis = target.clone().cpu().float()
         vis_map = torch.zeros_like(target_vis, dtype=torch.float32)
         vis_map[target_vis == 1] = 1.0  # Anomaly -> White
         vis_map[target_vis == self.ignore_idx] = 0.4  # Void -> Gray
         vis_t = vis_map.unsqueeze(0).repeat(3, 1, 1)
 
-        # 4. Semantic Baseline (Quarto pannello opzionale)
+        # Semantic logits from baseline model (frozen class head)
         fourth_vis = None
-        if fourth_panel_data is not None and fourth_panel_data.dim() == 3 and fourth_panel_data.shape[0] > 2:
-            sem_indices = torch.argmax(fourth_panel_data, dim=0).cpu()
-            # _apply_colormap deve essere disponibile o adattato
-            if hasattr(self, '_apply_colormap'):
-                fourth_vis = self._apply_colormap(sem_indices)
-            else:
-                # Fallback rapido semantica in scala di grigi se manca colormap
-                fourth_vis = (sem_indices.float() / fourth_panel_data.shape[0]).unsqueeze(0).repeat(3, 1, 1)
+        if fourth_panel_data.dim() == 3 and fourth_panel_data.shape[0] > 2:
+            sem_indices = torch.argmax(fourth_panel_data, dim=0).cpu()  # [H, W]
+            fourth_vis = self._apply_colormap(sem_indices)  # [3, H, W]
 
-        # Composizione Plot
-        num_plots = 4 if fourth_vis is not None else 3
-        fig, axes = plt.subplots(1, num_plots, figsize=[5 * num_plots, 5], sharex=True, sharey=True)
+        elif fourth_panel_data.dim() == 3 and fourth_panel_data.shape[0] == 2:
+            baseline_val = fourth_panel_data[1]
+            fourth_vis = baseline_val.unsqueeze(0).repeat(3, 1, 1).cpu()
 
-        axes[0].imshow(img_vis.permute(1, 2, 0))
-        axes[0].set_title("Input")
+        else:
+            fourth_vis = torch.sigmoid(fourth_panel_data).cpu().repeat(3, 1, 1)
 
-        axes[1].imshow(vis_t.permute(1, 2, 0))
-        axes[1].set_title("GT (Wh=Anom, Gy=Void)")
+        fourth_vis = torch.clamp(fourth_vis, 0, 1)
 
-        # Qui vedrai VERDE (Normal) vs ROSSO (Anomaly) vs NERO (Ignore)
-        axes[2].imshow(pred_vis.permute(1, 2, 0))
-        axes[2].set_title("Pred (G=Norm, R=Anom)")
+        # Combination: [Input | Ground Truth | Anomaly Head | Semantic Class]
+        comparison = torch.cat([img_vis, vis_t, pred_vis, fourth_vis], dim=2)
 
-        if fourth_vis is not None:
-            axes[3].imshow(fourth_vis.permute(1, 2, 0))
-            axes[3].set_title("Semantic Seg")
+        # 6. Log su WandB
+        try:
+            if hasattr(self.logger, 'experiment') and hasattr(self.logger.experiment, 'log'):
+                from torchvision.transforms.functional import to_pil_image
+                caption = f"{prefix}_L{layer_idx}_Input_GT_AnomalyHead_SemanticClass"
+                # Convert to PIL Image to ensure robust serialization to WandB
+                pil_comparison = to_pil_image(comparison.cpu())
+                self.logger.experiment.log({
+                    f"val_images/{prefix}_layer_{layer_idx}": [
+                        wandb.Image(pil_comparison, caption=caption)
+                    ]
+                })
+        except Exception as e:
+            print(f"Warning: Could not log to wandb: {e}")
 
-        for ax in axes: ax.axis("off")
+        # Debug locale (opzionale)
+        if batch_idx == 0 and layer_idx == 0:
+            save_image(comparison, f"debug_vis_{prefix}.png")
 
-        buf = io.BytesIO()
-        plt.tight_layout()
-        plt.savefig(buf, facecolor="black")
-        plt.close(fig)
-        buf.seek(0)
-
-        block_postfix = self.block_postfix(layer_idx)
-        name = f"{prefix}_pred_{batch_idx}{block_postfix}"
-
-        # Log sicuro con controllo se logger esiste
-        if hasattr(self.trainer, 'logger') and hasattr(self.trainer.logger, 'experiment'):
-            self.trainer.logger.experiment.log({name: [wandb.Image(Image.open(buf))]})
+    # @torch.compiler.disable
+    # def plot_semantic_new(self, img, target, logits, fourth_panel_data, prefix, layer_idx, batch_idx):
+    #     import wandb
+    #     import matplotlib.pyplot as plt
+    #
+    #     # 1. Immagine Input (Raw)
+    #     if img.dtype == torch.uint8:
+    #         img_vis = img.float() / 255.0
+    #     else:
+    #         img_vis = img.clone()
+    #         # Gestione range dinamico non standard
+    #         if img_vis.max() > 1.1:
+    #             img_vis = img_vis / 255.0
+    #     img_vis = torch.clamp(img_vis, 0, 1).cpu()
+    #
+    #     # 2. Logica di Visualizzazione Composita (RGB)
+    #     # logits ha shape [2, H, W] -> [Normal, Anomaly]
+    #     # Creiamo una mappa RGB di diagnostica
+    #     if logits.dim() == 3 and logits.shape[0] == 2:
+    #         normal_map = torch.clamp(logits[0], 0, 1).cpu()
+    #         anomaly_map = torch.clamp(logits[1], 0, 1).cpu()
+    #
+    #         # R=Anomaly, G=Normal, B=0
+    #         # Risultato:
+    #         # - Verde brillante: Zona sicura e riconosciuta
+    #         # - Rosso brillante: Anomalia
+    #         # - Giallo: Incertezza (sovrapposizione)
+    #         # - Nero: "No Object" (il modello ignora questa zona)
+    #         pred_vis = torch.stack([anomaly_map, normal_map, torch.zeros_like(anomaly_map)], dim=0)
+    #     else:
+    #         # Fallback per compatibilità vecchia
+    #         prob = torch.sigmoid(logits[0]) if logits.dim() == 3 else torch.sigmoid(logits)
+    #         pred_vis = prob.unsqueeze(0).repeat(3, 1, 1).cpu()
+    #
+    #     pred_vis = torch.clamp(pred_vis, 0, 1)
+    #
+    #     # 3. Ground Truth (Grigio=Void, Bianco=Anomaly, Nero=Normal)
+    #     target_vis = target.clone().cpu().float()
+    #     vis_map = torch.zeros_like(target_vis, dtype=torch.float32)
+    #     vis_map[target_vis == 1] = 1.0  # Anomaly -> White
+    #     vis_map[target_vis == self.ignore_idx] = 0.4  # Void -> Gray
+    #     vis_t = vis_map.unsqueeze(0).repeat(3, 1, 1)
+    #
+    #     # 4. Semantic Baseline (Quarto pannello opzionale)
+    #     fourth_vis = None
+    #     if fourth_panel_data is not None and fourth_panel_data.dim() == 3 and fourth_panel_data.shape[0] > 2:
+    #         sem_indices = torch.argmax(fourth_panel_data, dim=0).cpu()
+    #         # _apply_colormap deve essere disponibile o adattato
+    #         if hasattr(self, '_apply_colormap'):
+    #             fourth_vis = self._apply_colormap(sem_indices)
+    #         else:
+    #             # Fallback rapido semantica in scala di grigi se manca colormap
+    #             fourth_vis = (sem_indices.float() / fourth_panel_data.shape[0]).unsqueeze(0).repeat(3, 1, 1)
+    #
+    #     # Composizione Plot
+    #     num_plots = 4 if fourth_vis is not None else 3
+    #     fig, axes = plt.subplots(1, num_plots, figsize=[5 * num_plots, 5], sharex=True, sharey=True)
+    #
+    #     axes[0].imshow(img_vis.permute(1, 2, 0))
+    #     axes[0].set_title("Input")
+    #
+    #     axes[1].imshow(vis_t.permute(1, 2, 0))
+    #     axes[1].set_title("GT (Wh=Anom, Gy=Void)")
+    #
+    #     # Qui vedrai VERDE (Normal) vs ROSSO (Anomaly) vs NERO (Ignore)
+    #     axes[2].imshow(pred_vis.permute(1, 2, 0))
+    #     axes[2].set_title("Pred (G=Norm, R=Anom)")
+    #
+    #     if fourth_vis is not None:
+    #         axes[3].imshow(fourth_vis.permute(1, 2, 0))
+    #         axes[3].set_title("Semantic Seg")
+    #
+    #     for ax in axes: ax.axis("off")
+    #
+    #     buf = io.BytesIO()
+    #     plt.tight_layout()
+    #     plt.savefig(buf, facecolor="black")
+    #     plt.close(fig)
+    #     buf.seek(0)
+    #
+    #     block_postfix = self.block_postfix(layer_idx)
+    #     name = f"{prefix}_pred_{batch_idx}{block_postfix}"
+    #
+    #     # Log sicuro con controllo se logger esiste
+    #     if hasattr(self.trainer, 'logger') and hasattr(self.trainer.logger, 'experiment'):
+    #         self.trainer.logger.experiment.log({name: [wandb.Image(Image.open(buf))]})
 
     '''
     def plot_semantic(self, img, target, logits, baseline_logits, prefix, layer_idx, batch_idx):
