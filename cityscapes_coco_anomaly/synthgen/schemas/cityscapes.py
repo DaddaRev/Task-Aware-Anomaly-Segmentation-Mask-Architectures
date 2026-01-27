@@ -1,6 +1,6 @@
 from pathlib import Path
 from dataclasses import dataclass
-from cityscapes_coco_anomaly.synthgen.schemas import CocoInstance
+from .coco import CocoInstance
 
 CITYSCAPES_TRAINID_TO_NAME: dict[int, str] = {
     0: "road",

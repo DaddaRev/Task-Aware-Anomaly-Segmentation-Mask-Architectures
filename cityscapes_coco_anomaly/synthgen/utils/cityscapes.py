@@ -7,7 +7,7 @@ import numpy as np
 from typing import Any
 from pathlib import Path
 
-from cityscapes_coco_anomaly.synthgen.utils import ensure_exists, read_image_rgb, read_png_uint8
+from .io import ensure_exists, read_image_rgb, read_png_uint8
 
 from cityscapes_coco_anomaly.synthgen.schemas import (CityscapesPaths,
                                                       CITYSCAPES_NAME_TO_TRAINID,
