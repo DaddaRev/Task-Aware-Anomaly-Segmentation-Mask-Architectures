@@ -59,7 +59,7 @@ data:
     val_split: 0.1  # 80% train, 20% val
     datasets:
       - name: CocoCity
-        root: ../../../input/cityscape-cutpaste-coco-highlighted/train  #To run on kaggle
+        root: /content/MaskArchitectureAnomaly/eomt/dataset_coco-anomaly/train  #To run on Colab
         images_dir: images
         masks_dir: gt_pixel
         image_glob : "*.png"
