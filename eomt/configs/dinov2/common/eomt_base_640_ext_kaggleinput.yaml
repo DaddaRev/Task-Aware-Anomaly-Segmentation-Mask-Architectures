@@ -30,8 +30,8 @@ model:
     warmup_steps: [25, 50]  # Reduced for small dataset (from [100, 200])
 
     # Loss coefficients
-    mask_coefficient: 4.0 # from 4.0
-    dice_coefficient: 4.0 # from 4.0
+    mask_coefficient: 4.0
+    dice_coefficient: 4.0 
     class_coefficient: 3.0  #from 3.0
 
     # Checkpoint loading (CRITICAL!)
@@ -59,7 +59,7 @@ data:
     val_split: 0.1  # 80% train, 20% val
     datasets:
       - name: CocoCity
-        root: /content/MaskArchitectureAnomaly/eomt/dataset_coco-anomaly/data/synth/cs_coco_anom_v2/train  #To run on Colab
+        root: /content/MaskArchitectureAnomaly/eomt/dataset_coco-anomaly/train  #To run on Colab
         images_dir: images
         masks_dir: gt_pixel
         image_glob : "*.png"

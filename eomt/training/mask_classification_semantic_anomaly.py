@@ -107,14 +107,8 @@ class MCS_Anomaly(MaskClassificationSemantic):
         #     print("Unfreezing query embeddings...")
         #     self.network.q.weight.requires_grad = True
 
-    def _preprocess_images(self, imgs):
-        if imgs.dtype == torch.uint8:
-            imgs = imgs.float() / 255.0
-        imgs = (imgs - self.pixel_mean) / self.pixel_std
-        return imgs
-
     def forward(self, x):
-        x = self._preprocess_images(x)
+        x = x / 255.0  
         return self.network(x)
 
     def _unstack_targets(self, imgs, targets):
