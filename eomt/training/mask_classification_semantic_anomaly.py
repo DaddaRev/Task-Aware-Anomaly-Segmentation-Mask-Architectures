@@ -6,6 +6,8 @@ import torch.nn.functional as F
 from torchvision.utils import save_image
 from typing import Optional, List
 
+from wandb import Image
+
 from .mask_classification_loss import MaskClassificationLoss
 from .mask_classification_semantic import MaskClassificationSemantic
 
@@ -217,92 +219,92 @@ class MCS_Anomaly(MaskClassificationSemantic):
                     log_prefix, i, batch_idx
                 )
 
-            @torch.compiler.disable
-            def plot_semantic_new(self, img, target, logits, fourth_panel_data, prefix, layer_idx, batch_idx):
-                import wandb
-                import matplotlib.pyplot as plt
+    @torch.compiler.disable
+    def plot_semantic_new(self, img, target, logits, fourth_panel_data, prefix, layer_idx, batch_idx):
+        import wandb
+        import matplotlib.pyplot as plt
 
-                # 1. Immagine Input (Raw)
-                if img.dtype == torch.uint8:
-                    img_vis = img.float() / 255.0
-                else:
-                    img_vis = img.clone()
-                    # Gestione range dinamico non standard
-                    if img_vis.max() > 1.1:
-                        img_vis = img_vis / 255.0
-                img_vis = torch.clamp(img_vis, 0, 1).cpu()
+        # 1. Immagine Input (Raw)
+        if img.dtype == torch.uint8:
+            img_vis = img.float() / 255.0
+        else:
+            img_vis = img.clone()
+            # Gestione range dinamico non standard
+            if img_vis.max() > 1.1:
+                img_vis = img_vis / 255.0
+        img_vis = torch.clamp(img_vis, 0, 1).cpu()
 
-                # 2. Logica di Visualizzazione Composita (RGB)
-                # logits ha shape [2, H, W] -> [Normal, Anomaly]
-                # Creiamo una mappa RGB di diagnostica
-                if logits.dim() == 3 and logits.shape[0] == 2:
-                    normal_map = torch.clamp(logits[0], 0, 1).cpu()
-                    anomaly_map = torch.clamp(logits[1], 0, 1).cpu()
+        # 2. Logica di Visualizzazione Composita (RGB)
+        # logits ha shape [2, H, W] -> [Normal, Anomaly]
+        # Creiamo una mappa RGB di diagnostica
+        if logits.dim() == 3 and logits.shape[0] == 2:
+            normal_map = torch.clamp(logits[0], 0, 1).cpu()
+            anomaly_map = torch.clamp(logits[1], 0, 1).cpu()
 
-                    # R=Anomaly, G=Normal, B=0
-                    # Risultato:
-                    # - Verde brillante: Zona sicura e riconosciuta
-                    # - Rosso brillante: Anomalia
-                    # - Giallo: Incertezza (sovrapposizione)
-                    # - Nero: "No Object" (il modello ignora questa zona)
-                    pred_vis = torch.stack([anomaly_map, normal_map, torch.zeros_like(anomaly_map)], dim=0)
-                else:
-                    # Fallback per compatibilità vecchia
-                    prob = torch.sigmoid(logits[0]) if logits.dim() == 3 else torch.sigmoid(logits)
-                    pred_vis = prob.unsqueeze(0).repeat(3, 1, 1).cpu()
+            # R=Anomaly, G=Normal, B=0
+            # Risultato:
+            # - Verde brillante: Zona sicura e riconosciuta
+            # - Rosso brillante: Anomalia
+            # - Giallo: Incertezza (sovrapposizione)
+            # - Nero: "No Object" (il modello ignora questa zona)
+            pred_vis = torch.stack([anomaly_map, normal_map, torch.zeros_like(anomaly_map)], dim=0)
+        else:
+            # Fallback per compatibilità vecchia
+            prob = torch.sigmoid(logits[0]) if logits.dim() == 3 else torch.sigmoid(logits)
+            pred_vis = prob.unsqueeze(0).repeat(3, 1, 1).cpu()
 
-                pred_vis = torch.clamp(pred_vis, 0, 1)
+        pred_vis = torch.clamp(pred_vis, 0, 1)
 
-                # 3. Ground Truth (Grigio=Void, Bianco=Anomaly, Nero=Normal)
-                target_vis = target.clone().cpu().float()
-                vis_map = torch.zeros_like(target_vis, dtype=torch.float32)
-                vis_map[target_vis == 1] = 1.0  # Anomaly -> White
-                vis_map[target_vis == self.ignore_idx] = 0.4  # Void -> Gray
-                vis_t = vis_map.unsqueeze(0).repeat(3, 1, 1)
+        # 3. Ground Truth (Grigio=Void, Bianco=Anomaly, Nero=Normal)
+        target_vis = target.clone().cpu().float()
+        vis_map = torch.zeros_like(target_vis, dtype=torch.float32)
+        vis_map[target_vis == 1] = 1.0  # Anomaly -> White
+        vis_map[target_vis == self.ignore_idx] = 0.4  # Void -> Gray
+        vis_t = vis_map.unsqueeze(0).repeat(3, 1, 1)
 
-                # 4. Semantic Baseline (Quarto pannello opzionale)
-                fourth_vis = None
-                if fourth_panel_data is not None and fourth_panel_data.dim() == 3 and fourth_panel_data.shape[0] > 2:
-                    sem_indices = torch.argmax(fourth_panel_data, dim=0).cpu()
-                    # _apply_colormap deve essere disponibile o adattato
-                    if hasattr(self, '_apply_colormap'):
-                        fourth_vis = self._apply_colormap(sem_indices)
-                    else:
-                        # Fallback rapido semantica in scala di grigi se manca colormap
-                        fourth_vis = (sem_indices.float() / fourth_panel_data.shape[0]).unsqueeze(0).repeat(3, 1, 1)
+        # 4. Semantic Baseline (Quarto pannello opzionale)
+        fourth_vis = None
+        if fourth_panel_data is not None and fourth_panel_data.dim() == 3 and fourth_panel_data.shape[0] > 2:
+            sem_indices = torch.argmax(fourth_panel_data, dim=0).cpu()
+            # _apply_colormap deve essere disponibile o adattato
+            if hasattr(self, '_apply_colormap'):
+                fourth_vis = self._apply_colormap(sem_indices)
+            else:
+                # Fallback rapido semantica in scala di grigi se manca colormap
+                fourth_vis = (sem_indices.float() / fourth_panel_data.shape[0]).unsqueeze(0).repeat(3, 1, 1)
 
-                # Composizione Plot
-                num_plots = 4 if fourth_vis is not None else 3
-                fig, axes = plt.subplots(1, num_plots, figsize=[5 * num_plots, 5], sharex=True, sharey=True)
+        # Composizione Plot
+        num_plots = 4 if fourth_vis is not None else 3
+        fig, axes = plt.subplots(1, num_plots, figsize=[5 * num_plots, 5], sharex=True, sharey=True)
 
-                axes[0].imshow(img_vis.permute(1, 2, 0))
-                axes[0].set_title("Input")
+        axes[0].imshow(img_vis.permute(1, 2, 0))
+        axes[0].set_title("Input")
 
-                axes[1].imshow(vis_t.permute(1, 2, 0))
-                axes[1].set_title("GT (Wh=Anom, Gy=Void)")
+        axes[1].imshow(vis_t.permute(1, 2, 0))
+        axes[1].set_title("GT (Wh=Anom, Gy=Void)")
 
-                # Qui vedrai VERDE (Normal) vs ROSSO (Anomaly) vs NERO (Ignore)
-                axes[2].imshow(pred_vis.permute(1, 2, 0))
-                axes[2].set_title("Pred (G=Norm, R=Anom)")
+        # Qui vedrai VERDE (Normal) vs ROSSO (Anomaly) vs NERO (Ignore)
+        axes[2].imshow(pred_vis.permute(1, 2, 0))
+        axes[2].set_title("Pred (G=Norm, R=Anom)")
 
-                if fourth_vis is not None:
-                    axes[3].imshow(fourth_vis.permute(1, 2, 0))
-                    axes[3].set_title("Semantic Seg")
+        if fourth_vis is not None:
+            axes[3].imshow(fourth_vis.permute(1, 2, 0))
+            axes[3].set_title("Semantic Seg")
 
-                for ax in axes: ax.axis("off")
+        for ax in axes: ax.axis("off")
 
-                buf = io.BytesIO()
-                plt.tight_layout()
-                plt.savefig(buf, facecolor="black")
-                plt.close(fig)
-                buf.seek(0)
+        buf = io.BytesIO()
+        plt.tight_layout()
+        plt.savefig(buf, facecolor="black")
+        plt.close(fig)
+        buf.seek(0)
 
-                block_postfix = self.block_postfix(layer_idx)
-                name = f"{prefix}_pred_{batch_idx}{block_postfix}"
+        block_postfix = self.block_postfix(layer_idx)
+        name = f"{prefix}_pred_{batch_idx}{block_postfix}"
 
-                # Log sicuro con controllo se logger esiste
-                if hasattr(self.trainer, 'logger') and hasattr(self.trainer.logger, 'experiment'):
-                    self.trainer.logger.experiment.log({name: [wandb.Image(Image.open(buf))]})
+        # Log sicuro con controllo se logger esiste
+        if hasattr(self.trainer, 'logger') and hasattr(self.trainer.logger, 'experiment'):
+            self.trainer.logger.experiment.log({name: [wandb.Image(Image.open(buf))]})
 
     '''
     def plot_semantic(self, img, target, logits, baseline_logits, prefix, layer_idx, batch_idx):
