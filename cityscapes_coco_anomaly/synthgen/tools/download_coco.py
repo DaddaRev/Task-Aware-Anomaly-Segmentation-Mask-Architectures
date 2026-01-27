@@ -3,7 +3,7 @@ from pathlib import Path
 from dataclasses import dataclass
 
 from cityscapes_coco_anomaly.synthgen.utils import ensure_exists
-from cityscapes_coco_anomaly.synthgen.tools import download_file, extract_zip
+from .downloader import download_file, extract_zip
 
 COCO_TRAIN2017_URL = "http://images.cocodataset.org/zips/train2017.zip"
 COCO_ANN_TRAINVAL2017_URL = "http://images.cocodataset.org/annotations/annotations_trainval2017.zip"
