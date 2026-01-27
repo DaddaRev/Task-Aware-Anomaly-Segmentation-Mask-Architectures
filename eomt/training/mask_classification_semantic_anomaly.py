@@ -445,6 +445,30 @@ class MCS_Anomaly(MaskClassificationSemantic):
             save_image(comparison, f"debug_vis_{prefix}.png")
         '''
 
+    @torch.compiler.disable
+    def _apply_colormap(self, tensor_indices):
+        """
+        Converts a 2D tensor of class indices [H, W] into a 3D RGB image tensor [3, H, W]
+        using the 'tab20' colormap from Matplotlib.
+        """
+        import matplotlib.pyplot as plt
+
+        # 1. Retrieve the colormap
+        cmap = plt.get_cmap('tab20')
+        num_colors = 20
+
+        # 2. Create a palette tensor
+        palette = torch.tensor(
+            [cmap(i)[:3] for i in range(num_colors)], dtype=torch.float32
+        ).to(tensor_indices.device)
+
+        # 3. Apply the palette using advanced indexing
+        colored_img = palette[tensor_indices.long().clamp(0, num_colors - 1)]
+
+        # 4. Permute dimensions to match PyTorch standard (Channels First)
+        # Transformation: [H, W, 3] -> [3, H, W]
+        return colored_img.permute(2, 0, 1)
+
     def _compute_baseline_msp(self, mask_logits, class_logits, origins, img_sizes):
             """
             Compute baseline anomaly detection using Maximum Softmax Probability (MSP)
