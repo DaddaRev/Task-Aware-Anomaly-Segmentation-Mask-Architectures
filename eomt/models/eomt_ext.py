@@ -40,7 +40,7 @@ class EoMT_EXT(nn.Module):
         # ANOMALY HEAD: Predicts [Normal, Anomaly, No_Object]
         # Input: [query_emb (C)] + [entropy (1)] + [max_prob (1)]
         # UPGRADE: MLP allows learning non-linear interactions between semantics and uncertainty
-        internal_anomaly_layers = self.encoder.backbone.embed_dim // 2
+        internal_anomaly_layers = self.encoder.backbone.embed_dim
         self.anomaly_head = nn.Sequential(
             nn.Linear(self.encoder.backbone.embed_dim + 2, internal_anomaly_layers),
             nn.GELU(),
@@ -79,9 +79,9 @@ class EoMT_EXT(nn.Module):
         # stop_gradient just in case, though class_head is frozen in training loop usually
         uncertainty_feats = torch.cat([entropy, max_prob], dim=-1).detach()
 
-        # Inject into normality head
+        # Inject into anomaly head
         q_enriched = torch.cat([q, uncertainty_feats], dim=-1)
-        normality_score = self.anomaly_head(q_enriched)
+        anomaly_score = self.anomaly_head(q_enriched)
 
         x = x[:, self.num_q + self.encoder.backbone.num_prefix_tokens :, :]
         x = x.transpose(1, 2).reshape(
@@ -92,7 +92,7 @@ class EoMT_EXT(nn.Module):
             "bqc, bchw -> bqhw", self.mask_head(q), self.upscale(x)
         )
 
-        return mask_logits, class_logits, normality_score
+        return mask_logits, class_logits, anomaly_score
 
     @torch.compiler.disable
     def _disable_attn_mask(self, attn_mask, prob):

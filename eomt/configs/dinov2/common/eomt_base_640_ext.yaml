@@ -50,11 +50,11 @@ data:
     num_workers: 4
     val_split: 0.2  # 80% train, 20% val
     datasets:
-      - name: CocoCity
-        root: eomt_trained_model/coco_city/data/synth/cs_coco_anom_v1/val
+      - name: RoadAnomaly
+        root: eomt_trained_model/Validation_Dataset/RoadAnomaly
         images_dir: images
-        masks_dir: gt_pixel
-        image_glob : "*.png"
+        masks_dir: labels_masks
+        image_glob: "*.jpg"
         mask_ext: "png"
         gt_format: binary_any_nonzero_is_ood_void255
-        skip_no_ood: true
+        skip_no_ood: false

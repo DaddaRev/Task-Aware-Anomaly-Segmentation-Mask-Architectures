@@ -189,7 +189,6 @@ class LightningModule(lightning.LightningModule):
 
     def forward(self, imgs):
         x = imgs / 255.0
-
         return self.network(x)
 
     def training_step(self, batch, batch_idx):
