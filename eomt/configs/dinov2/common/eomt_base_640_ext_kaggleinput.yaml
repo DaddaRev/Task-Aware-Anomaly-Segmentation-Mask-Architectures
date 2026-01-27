@@ -1,5 +1,13 @@
 trainer:
   max_epochs: 10
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        dirpath: ./final_model_anomaly
+        filename: "final_model_epoch_{epoch:02d}"
+        save_top_k: 0  # Don't save intermediate checkpoints
+        save_last: true  # Only save the final checkpoint
+        save_on_train_epoch_end: true
   logger:
     class_path: lightning.pytorch.loggers.wandb.WandbLogger
     init_args:
@@ -16,15 +24,15 @@ model:
     # attn_mask_annealing_end_steps: ...
 
     # Learning parameters (important for fine-tuning)
-    lr: 1.0e-4  # Low LR to preserve semantic knowledge
-    weight_decay: 0.05
+    lr: 5.0e-5  # from 5.0e-4
+    weight_decay: 0.1  # from 0.05
     poly_power: 0.9
-    warmup_steps: [100, 200]  # Reduced for small dataset (80 samples)
+    warmup_steps: [25, 50]  # Reduced for small dataset (from [100, 200])
 
     # Loss coefficients
     mask_coefficient: 4.0
     dice_coefficient: 4.0
-    class_coefficient: 2.0
+    class_coefficient: 3.0  #from 3.0
 
     # Checkpoint loading (CRITICAL!)
     ckpt_path: null  # Will be passed via CLI --model.ckpt_path
@@ -51,7 +59,7 @@ data:
     val_split: 0.1  # 80% train, 20% val
     datasets:
       - name: CocoCity
-        root: /content/MaskArchitectureAnomaly/eomt/dataset_coco-anomaly/data/synth/cs_coco_anom_v2/train  #To run on Colab
+        root: /content/MaskArchitectureAnomaly/eomt/dataset_coco-anomaly/train  #To run on Colab
         images_dir: images
         masks_dir: gt_pixel
         image_glob : "*.png"
