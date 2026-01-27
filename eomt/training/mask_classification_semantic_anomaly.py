@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torchvision.utils import save_image
 from typing import Optional, List
 
-from wandb import Image
+from PIL import Image
 
 from .mask_classification_loss import MaskClassificationLoss
 from .mask_classification_semantic import MaskClassificationSemantic
