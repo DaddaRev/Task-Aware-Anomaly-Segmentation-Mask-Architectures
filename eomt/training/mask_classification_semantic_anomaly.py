@@ -4,11 +4,7 @@ import torch
 from torch import nn
 from torchvision.utils import save_image
 from typing import Optional, List
-
-from PIL import Image
-
 from .mask_classification_loss import MaskClassificationLoss
-from ..models.vit import ViT
 # Add Anomaly Head definition here for clarity, or import it
 import torch.nn.functional as F
 
