@@ -14,6 +14,26 @@ import math
 
 from .scale_block import ScaleBlock
 
+class PixelAnomalyHead(nn.Module):
+    def __init__(self, input_dim=4, hidden_dim=64, dropout=0.1):
+        super(PixelAnomalyHead, self).__init__()
+        self.mlp = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.BatchNorm1d(hidden_dim),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim // 2, 1)
+        )
+
+    def forward(self, x):
+        # Input x: [B, H, W, 4]
+        b, h, w, c = x.shape
+        x_flat = x.reshape(-1, c) # [N, 4]
+        out = self.mlp(x_flat)    # [N, 1]
+        return out.reshape(b, h, w, 1)
 
 class EoMT_EXT(nn.Module):
     def __init__(
@@ -37,15 +57,8 @@ class EoMT_EXT(nn.Module):
 
         self.class_head = nn.Linear(self.encoder.backbone.embed_dim, num_classes + 1)
 
-        # ANOMALY HEAD: Predicts [Normal, Anomaly, No_Object]
-        # Input: [query_emb (C)] + [entropy (1)] + [max_prob (1)]
-        # UPGRADE: MLP allows learning non-linear interactions between semantics and uncertainty
-        internal_anomaly_layers = self.encoder.backbone.embed_dim
-        self.anomaly_head = nn.Sequential(
-            nn.Linear(self.encoder.backbone.embed_dim + 2, internal_anomaly_layers),
-            nn.GELU(),
-            nn.Linear(internal_anomaly_layers, 3)
-        )
+        # Unified Anomaly Head
+        self.anomaly_head = PixelAnomalyHead(input_dim=4)
 
         self.mask_head = nn.Sequential(
             nn.Linear(self.encoder.backbone.embed_dim, self.encoder.backbone.embed_dim),
@@ -69,20 +82,6 @@ class EoMT_EXT(nn.Module):
 
         class_logits = self.class_head(q)
 
-        # --- Uncertainty Injection ---
-        # Calculate Entropy and Max Prob from the *frozen* class head predictions
-        probs = F.softmax(class_logits, dim=-1)
-        log_probs = F.log_softmax(class_logits, dim=-1)
-        entropy = -torch.sum(probs * log_probs, dim=-1, keepdim=True)  # [B, Q, 1]
-        max_prob, _ = torch.max(probs, dim=-1, keepdim=True)           # [B, Q, 1]
-
-        # stop_gradient just in case, though class_head is frozen in training loop usually
-        uncertainty_feats = torch.cat([entropy, max_prob], dim=-1).detach()
-
-        # Inject into anomaly head
-        q_enriched = torch.cat([q, uncertainty_feats], dim=-1)
-        anomaly_score = self.anomaly_head(q_enriched)
-
         x = x[:, self.num_q + self.encoder.backbone.num_prefix_tokens :, :]
         x = x.transpose(1, 2).reshape(
             x.shape[0], -1, *self.encoder.backbone.patch_embed.grid_size
@@ -92,7 +91,7 @@ class EoMT_EXT(nn.Module):
             "bqc, bchw -> bqhw", self.mask_head(q), self.upscale(x)
         )
 
-        return mask_logits, class_logits, anomaly_score
+        return mask_logits, class_logits
 
     @torch.compiler.disable
     def _disable_attn_mask(self, attn_mask, prob):
@@ -186,7 +185,7 @@ class EoMT_EXT(nn.Module):
             x = self.encoder.backbone._pos_embed(x)
 
         attn_mask = None
-        mask_logits_per_layer, class_logits_per_layer, normality_logits_per_layer = [], [], []
+        mask_logits_per_layer, class_logits_per_layer = [], []
 
         for i, block in enumerate(self.encoder.backbone.blocks):
             if i == len(self.encoder.backbone.blocks) - self.num_blocks:
@@ -198,10 +197,9 @@ class EoMT_EXT(nn.Module):
                 self.masked_attn_enabled
                 and i >= len(self.encoder.backbone.blocks) - self.num_blocks
             ):
-                mask_logits, class_logits, normality_logits = self._predict(self.encoder.backbone.norm(x))
+                mask_logits, class_logits = self._predict(self.encoder.backbone.norm(x))
                 mask_logits_per_layer.append(mask_logits)
                 class_logits_per_layer.append(class_logits)
-                normality_logits_per_layer.append(normality_logits)
 
                 attn_mask = self._attn_mask(x, mask_logits, i)
 
@@ -221,13 +219,59 @@ class EoMT_EXT(nn.Module):
             elif hasattr(block, "layer_scale2"):
                 x = x + block.layer_scale2(mlp_out)
 
-        mask_logits, class_logits, normality_logits = self._predict(self.encoder.backbone.norm(x))
+        mask_logits, class_logits = self._predict(self.encoder.backbone.norm(x))
         mask_logits_per_layer.append(mask_logits)
         class_logits_per_layer.append(class_logits)
-        normality_logits_per_layer.append(normality_logits)
 
         return (
             mask_logits_per_layer,
-            class_logits_per_layer,
-            normality_logits_per_layer
+            class_logits_per_layer
         )
+
+    def compute_anomaly_score(self, mask_logits, class_logits, img_size):
+        """
+        Computes the pixel-wise anomaly score using the internal anomaly_head.
+        This encapsulates the 'Bridge' logic (converting sparse queries to dense features)
+        and the MLP forward pass.
+
+        Args:
+            mask_logits: [B, Q, H_feat, W_feat]
+            class_logits: [B, Q, C]
+            img_size: tuple (H, W) target resolution
+        """
+        # 1. Feature Extraction (The Bridge)
+        mask_logits_up = F.interpolate(mask_logits, size=img_size, mode="bilinear", align_corners=False)
+        mask_probs = mask_logits_up.sigmoid() # [B, Q, H, W]
+
+        class_probs = F.softmax(class_logits, dim=-1) # [B, Q, C]
+
+        # Exclude "No Object" / "Void" class if it exists (usually last index)
+        valid_class_probs = class_probs[..., :-1]
+
+        # EINSUM: Combine masks and class probs -> [B, Class_valid, H, W]
+        semantic_map = torch.einsum("bqhw, bqc -> bchw", mask_probs, valid_class_probs)
+
+        # 2. Extract Uncertainty Features per pixel [B, H, W]
+        # A. Max Logit / Probability (Confidence)
+        max_prob, _ = semantic_map.max(dim=1)
+
+        # B. Entropy
+        semantic_map_clamped = torch.clamp(semantic_map, min=1e-7)
+        entropy = -(semantic_map_clamped * torch.log(semantic_map_clamped)).sum(dim=1)
+
+        # C. Energy proxy (Sum of probs)
+        energy_proxy = semantic_map.sum(dim=1)
+
+        # D. Simple MSP
+        msp = 1.0 - max_prob
+
+        # Stack Features: [B, H, W, 4]
+        features = torch.stack([max_prob, entropy, energy_proxy, msp], dim=-1)
+
+        # Normalize features
+        if features.size(0) > 1: # Batch norm style requires batch > 1 or careful handling
+             # Simple instance-like normalization to keep MLP stable
+             features = (features - features.mean(dim=(1,2), keepdim=True)) / (features.std(dim=(1,2), keepdim=True) + 1e-6)
+
+        # 3. MLP Forward
+        return self.anomaly_head(features)

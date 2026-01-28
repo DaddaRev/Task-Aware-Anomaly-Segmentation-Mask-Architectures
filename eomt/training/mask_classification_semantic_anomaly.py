@@ -2,15 +2,18 @@ import io
 
 import torch
 from torch import nn
-import torch.nn.functional as F
 from torchvision.utils import save_image
 from typing import Optional, List
 
 from PIL import Image
 
 from .mask_classification_loss import MaskClassificationLoss
-from .mask_classification_semantic import MaskClassificationSemantic
+from ..models.vit import ViT
+# Add Anomaly Head definition here for clarity, or import it
+import torch.nn.functional as F
 
+# Fix unresolved reference: Import MaskClassificationSemantic
+from .mask_classification_semantic import MaskClassificationSemantic
 
 class MCS_Anomaly(MaskClassificationSemantic):
 
@@ -27,12 +30,11 @@ class MCS_Anomaly(MaskClassificationSemantic):
             lr: float = 1e-5,
             llrd: float = 0.8,
             llrd_l2_enabled: bool = True,
-            lr_mult: float = 1.0,
             weight_decay: float = 0.05,
             oversample_ratio: float = 3.0,
             importance_sample_ratio: float = 0.75,
             poly_power: float = 0.9,
-            warmup_steps: List[int] = [500, 1000],
+            warmup_steps: Optional[List[int]] = None,
             mask_coefficient: float = 2.0,
             dice_coefficient: float = 4.0,
             class_coefficient: float = 4.0,
@@ -47,6 +49,9 @@ class MCS_Anomaly(MaskClassificationSemantic):
         no_object_coefficient = 1.0
         bg_coefficient = 1.0
 
+        if warmup_steps is None:
+            warmup_steps = [500, 1000]
+
         super().__init__(
             network=network,
             img_size=img_size,
@@ -58,7 +63,6 @@ class MCS_Anomaly(MaskClassificationSemantic):
             lr=lr,
             llrd=llrd,
             llrd_l2_enabled=llrd_l2_enabled,
-            lr_mult=lr_mult,
             weight_decay=weight_decay,
             num_points=num_points,
             oversample_ratio=oversample_ratio,
@@ -73,7 +77,6 @@ class MCS_Anomaly(MaskClassificationSemantic):
             ckpt_path=ckpt_path,
             delta_weights=delta_weights,
             load_ckpt_class_head=load_ckpt_class_head,
-            no_object_coefficient=no_object_coefficient,
             **kwargs
         )
 
@@ -95,14 +98,20 @@ class MCS_Anomaly(MaskClassificationSemantic):
         self.register_buffer("pixel_mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
         self.register_buffer("pixel_std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
 
+        # Freeze network, Unfreeze ONLY the internal anomaly_head
         for param in self.network.parameters():
             param.requires_grad = False
 
-        # Unfreeze ANOMALY HEAD (trainable)
+        # Assuming the unified model now has this attribute
         if hasattr(self.network, 'anomaly_head'):
-            print("Unfreezing anomaly_head params...")
-            for param in self.network.anomaly_head.parameters():
-                param.requires_grad = True
+             print("Unfreezing anomaly_head inside network...")
+             for param in self.network.anomaly_head.parameters():
+                 param.requires_grad = True
+        else:
+             print("WARNING: 'anomaly_head' not found in network. Training might fail.")
+
+        self.lr = 1e-4 # Maybe smaller for just the head?
+        self.weight_decay = 0.05
 
         # --- Balanced Strategy ---
         # Keep mask_head/upscale frozen to preserve semantic performance.
@@ -129,40 +138,79 @@ class MCS_Anomaly(MaskClassificationSemantic):
 
     def training_step(self, batch, batch_idx):
         imgs, targets = batch
-        targets = self._unstack_targets(imgs, targets)
 
-        # Prepare targets for anomaly mask loss
-        # Class 0: Normal (Road, etc)
-        # Class 1: Anomaly (Explicit supervision on anomalies)
-        # Class 255: Void -> Map to No-Object (Implicitly ignored by not including in targets)
-        targets_for_loss = []
-        for t in targets:
-            # Keep Normal(0) and Anomaly(1). Ignore Void(255).
-            keep = (t["labels"] == 0) | (t["labels"] == 1)
-            targets_for_loss.append({
-                "masks": t["masks"][keep],
-                "labels": t["labels"][keep] # Labels are already 0 and 1
-            })
+        # 1. Forward Pass of Backbone (frozen)
+        # We only need the valid output
+        with torch.no_grad():
+             outputs = self.network(imgs)
+             # outputs is tuple: (mask_logits_list, class_logits_list)
+             # We want the LAST layer output
+             mask_logits = outputs[0][-1] # [B, Q, H/4, W/4] usually
+             class_logits = outputs[1][-1] # [B, Q, C]
 
-        # Forward Pass --> 20 class logits for each query (100 queries)
-        mask_logits_per_block, class_logits_per_block, anomaly_logits_per_block = self(imgs)
+        # 2. Compute Anomaly Score using the unified model method
+        # This handles Feature Extraction + MLP
+        b, _, h, w = imgs.shape
 
-        losses_all_blocks = {}
-        for i, (mask_logits, class_logits, anomaly_logits) in enumerate(
-                list(zip(mask_logits_per_block, class_logits_per_block, anomaly_logits_per_block))
-        ):
-            losses = self.criterion_anomalymask(
-                masks_queries_logits=mask_logits,
-                class_queries_logits=anomaly_logits,
-                targets=targets_for_loss,
-            )
-            block_postfix = self.block_postfix(i)
-            losses = {f"{key}{block_postfix}": value for key, value in losses.items()}
-            losses_all_blocks |= losses
+        # Since we are training the head, we must allow gradients here if the method backprops to head
+        # The head is part of self.network.
+        # But self.network(imgs) was under no_grad().
+        # Wait, compute_anomaly_score calls self.network.anomaly_head. It needs gradients.
 
-        return self.criterion_anomalymask.loss_total(losses_all_blocks, self.log)
-    
-    def eval_step(self, batch, batch_idx=None, log_prefix=None):
+        anomaly_logits = self.network.compute_anomaly_score(mask_logits, class_logits, (h, w)) # [B, H, W, 1]
+
+        # 4. Prepare Targets (Binary Anomaly Mask)
+        gt_anomaly_mask = self._prepare_dense_targets(targets, (h, w))
+
+        # 5. Loss (BCE)
+        loss = F.binary_cross_entropy_with_logits(
+            anomaly_logits.squeeze(-1),
+            gt_anomaly_mask.float(),
+            pos_weight=torch.tensor([10.0]).to(imgs.device) # Handle class imbalance
+        )
+
+        self.log("train_loss_anomaly", loss)
+
+        # Logging / Visualization (Every N steps)
+        if batch_idx % 100 == 0:
+             self.plot_semantic(
+                 imgs[0],
+                 gt_anomaly_mask[0].cpu().numpy(),
+                 anomaly_logits[0].sigmoid().detach().cpu().numpy(),
+                 None, # Baseline logits (optional)
+                 "train",
+                 0,
+                 batch_idx
+             )
+
+        return loss
+
+    def _prepare_dense_targets(self, targets_list, shape):
+        b, h, w = len(targets_list), shape[0], shape[1]
+        gt_tensor = torch.zeros((b, h, w), device=self.device)
+
+        for i, t in enumerate(targets_list):
+            # t["masks"] and t["labels"] could be on CPU or GPU
+            # Find indices where label == 1 (Anomaly)
+            if "labels" in t and "masks" in t:
+                 # Ensure labels are on correct device
+                 labels = t["labels"].to(self.device)
+                 # Adjust label index if needed (depending on your dataset, 1 might be anomaly or a specific class)
+                 # Assuming 1 is the anomaly class ID as per your previous setup?
+                 # Or check dsets/training_anomaly.py to confirm anomaly class ID.
+                 # Usually 0 is void, 1 is anomaly? Or standard classes?
+                 # If anomaly is a specific class ID:
+                 anomaly_indices = (labels == 1).nonzero(as_tuple=True)[0]
+
+                 if len(anomaly_indices) > 0:
+                     anomaly_masks = t["masks"][anomaly_indices].to(self.device) # [K, H, W]
+                     if anomaly_masks.numel() > 0:
+                          combined = anomaly_masks.sum(dim=0).bool()
+                          gt_tensor[i] = combined.float()
+
+        return gt_tensor
+
+    def validation_step(self, batch, batch_idx=None, log_prefix=None):
         imgs, targets = batch
         targets = self._unstack_targets(imgs, targets)
         img_sizes = [img.shape[-2:] for img in imgs]
@@ -172,14 +220,35 @@ class MCS_Anomaly(MaskClassificationSemantic):
 
         crops, origins = self.window_imgs_semantic(imgs)
 
-        mask_logits_per_layer, class_logits_per_layer, anomaly_logits_per_layer = self(crops)
+        # Updated: Return 3 tuples, not tuple of lists
+        # Wait, EoMT forward returns (mask_list, class_list) OR (mask_list, class_list, anomaly_list) ???
+        # We need to update EoMT_EXT.forward signature.
+        # But inside MCS training_step we used self.network(imgs) and picked outputs[0][-1].
+        # Let's check EoMT_EXT.forward return value.
+        outputs = self.network(crops)
+        # Assuming EoMT_EXT returns (mask_list, class_list) as standard mask transformer
+        mask_logits_per_layer, class_logits_per_layer = outputs
+
+        # We need anomaly scores per layer too if we want to visualize/eval per layer
+        # But currently, we compute anomaly scores on the fly.
 
         targets = self.to_per_pixel_targets_semantic(targets, self.ignore_idx)
+
+        # Loop through layers
+        # Construct anomaly_logits_per_layer manually
+        anomaly_logits_per_layer = []
+        for masks, classes in zip(mask_logits_per_layer, class_logits_per_layer):
+             # Need image size of crops? crops is a tensor [B, C, H, W]
+             h, w = crops.shape[-2:]
+             anomaly_logits = self.network.compute_anomaly_score(masks, classes, (h, w))
+             anomaly_logits_per_layer.append(anomaly_logits)
 
         for i, (mask_logits, class_logits, anomaly_logits) in enumerate(
                 list(zip(mask_logits_per_layer, class_logits_per_layer, anomaly_logits_per_layer))
         ):
-            
+            # i is layer_idx
+            layer_idx = i
+
             probs_anomaly = anomaly_logits.softmax(dim=-1)
 
             # --- ANOMALY HEAD DIRECT PREDICTION ---
@@ -188,9 +257,6 @@ class MCS_Anomaly(MaskClassificationSemantic):
             valid_probs = probs_anomaly[..., :2]
 
             mask_logits = F.interpolate(mask_logits, self.img_size, mode="bilinear")
-
-            # REMOVE THIS AFTER DEBUG:
-            #crop_logits = self.to_per_pixel_logits_semantic(mask_logits, class_logits)
 
             # Combine Mask Probs (sigmoid) with Class Probs
             # [B, Q, H, W] x [B, Q, 2] -> [B, 2, H, W]
@@ -204,20 +270,23 @@ class MCS_Anomaly(MaskClassificationSemantic):
 
             self.update_metrics_semantic(logits, targets, i)
 
-            if batch_idx in [0,8,16,64]:
-                semantic_probs = class_logits.softmax(dim=-1)[..., :-1]
-
-                crop_sem_logits = torch.einsum(
-                    "bqhw, bqc -> bchw",
-                    mask_logits.sigmoid(),
-                    semantic_probs
-                )
-
-                sem_logits = self.revert_window_logits_semantic(crop_sem_logits, origins, img_sizes)
-                self.plot_semantic_new(
-                    imgs[0], targets[0], logits[0], sem_logits[0],
-                    log_prefix, i, batch_idx
-                )
+            # Use a slightly different batch index for visualization condition to avoid flooding logs
+            if batch_idx in [0, 8, 16] and layer_idx == 0:
+                 self.plot_semantic_new(
+                     imgs[0],
+                     targets[0],
+                     logits[0],
+                     # For the 4th panel (Semantic), we need to reconstruct semantic segmentation from frozen head
+                     self._compute_baseline_msp(
+                         mask_logits[0:1], # Keep batch dim: [1, Q, H, W]
+                         class_logits[0:1], # [1, Q, C]
+                         [origins[0]], # window info
+                         [img_sizes[0]] # window info
+                     )[0],
+                     log_prefix,
+                     i,
+                     batch_idx
+                 )
 
     @torch.compiler.disable
     def plot_semantic_new(self, img, target, logits, fourth_panel_data, prefix, layer_idx, batch_idx):
