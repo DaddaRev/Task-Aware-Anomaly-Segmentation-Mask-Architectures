@@ -187,15 +187,14 @@ class MCS_Anomaly(MaskClassificationSemantic):
 
         # Logging / Visualization (Every N steps)
         if batch_idx % 100 == 0:
-            self.plot_semantic(
-                imgs[0],
-                gt_anomaly_mask[0].cpu().numpy(),
-                anomaly_logits[0].sigmoid().detach().cpu().numpy(),
-                None,  # Baseline logits (optional)
-                "train",
-                0,
-                batch_idx
-            )
+             self.plot_semantic(
+                 imgs[0],
+                 gt_anomaly_mask[0].cpu().numpy(),
+                 anomaly_logits[0].sigmoid().detach().cpu().numpy(),
+                 "train", # log_prefix
+                 0,       # block_idx
+                 batch_idx # batch_idx
+             )
 
         return loss
 
