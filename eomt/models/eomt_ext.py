@@ -15,8 +15,19 @@ import math
 from .scale_block import ScaleBlock
 
 class PixelAnomalyHead(nn.Module):
-    def __init__(self, input_dim=4, hidden_dim=64, dropout=0.1):
+    def __init__(self, input_dim=4, feature_dim=0, hidden_dim=64, dropout=0.1):
         super(PixelAnomalyHead, self).__init__()
+
+        self.feature_dim = feature_dim
+
+        # If we use visual features, we project them down first to avoid massive MLP
+        if feature_dim > 0:
+            self.feature_proj = nn.Sequential(
+                nn.Conv2d(feature_dim, 32, kernel_size=1),
+                nn.ReLU()
+            )
+            input_dim += 32 # 4 stats + 32 visual features
+
         self.mlp = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
@@ -28,10 +39,28 @@ class PixelAnomalyHead(nn.Module):
             nn.Linear(hidden_dim // 2, 1)
         )
 
-    def forward(self, x):
-        # Input x: [B, H, W, 4]
+    def forward(self, x, features=None):
+        # x: [B, H, W, 4] (Logit stats)
+        # features: [B, C, H, W] (Visual features from backbone)
+
+        b, h, w, _ = x.shape
+
+        if self.feature_dim > 0 and features is not None:
+            # 1. Project features [B, C_in, H, W] -> [B, 32, H, W]
+            vis_feat = self.feature_proj(features)
+
+            # 2. Resize to match x if needed (usually x is full res or user defined, features are lower res)
+            if vis_feat.shape[-2:] != (h, w):
+                vis_feat = F.interpolate(vis_feat, size=(h, w), mode="bilinear", align_corners=False)
+
+            # 3. Permute to [B, H, W, 32]
+            vis_feat = vis_feat.permute(0, 2, 3, 1)
+
+            # 4. Concatenate: [B, H, W, 4+32]
+            x = torch.cat([x, vis_feat], dim=-1)
+
         b, h, w, c = x.shape
-        x_flat = x.reshape(-1, c) # [N, 4]
+        x_flat = x.reshape(-1, c) # [N, C_total]
         out = self.mlp(x_flat)    # [N, 1]
         return out.reshape(b, h, w, 1)
 
@@ -57,8 +86,13 @@ class EoMT_EXT(nn.Module):
 
         self.class_head = nn.Linear(self.encoder.backbone.embed_dim, num_classes + 1)
 
-        # Unified Anomaly Head
-        self.anomaly_head = PixelAnomalyHead(input_dim=4)
+        # Unified Anomaly Head with Image Features
+        # embed_dim is usually 768 for ViT-B (check your config)
+        # We pass it to the head so it knows how to project it.
+        self.anomaly_head = PixelAnomalyHead(
+            input_dim=4,
+            feature_dim=self.encoder.backbone.embed_dim
+        )
 
         self.mask_head = nn.Sequential(
             nn.Linear(self.encoder.backbone.embed_dim, self.encoder.backbone.embed_dim),
@@ -82,16 +116,26 @@ class EoMT_EXT(nn.Module):
 
         class_logits = self.class_head(q)
 
-        x = x[:, self.num_q + self.encoder.backbone.num_prefix_tokens :, :]
-        x = x.transpose(1, 2).reshape(
-            x.shape[0], -1, *self.encoder.backbone.patch_embed.grid_size
-        )
+        # Extract patch tokens for features
+        # x is [B, N_tokens, C]
+        patch_tokens = x[:, self.num_q + self.encoder.backbone.num_prefix_tokens :, :]
+
+        # Reshape to [B, C, H, W]
+        # Transpose (B, N, C) -> (B, C, N) -> reshape
+        b, n, c = patch_tokens.shape
+        h, w = self.encoder.backbone.patch_embed.grid_size
+
+        # Feature map for mask generation
+        feat_map = patch_tokens.transpose(1, 2).reshape(b, c, h, w)
+
+        # Upscaled features [B, C, H_up, W_up]
+        upscaled_feats = self.upscale(feat_map)
 
         mask_logits = torch.einsum(
-            "bqc, bchw -> bqhw", self.mask_head(q), self.upscale(x)
+            "bqc, bchw -> bqhw", self.mask_head(q), upscaled_feats
         )
 
-        return mask_logits, class_logits
+        return mask_logits, class_logits, feat_map
 
     @torch.compiler.disable
     def _disable_attn_mask(self, attn_mask, prob):
@@ -186,6 +230,8 @@ class EoMT_EXT(nn.Module):
 
         attn_mask = None
         mask_logits_per_layer, class_logits_per_layer = [], []
+        # We need features from the last layer
+        last_feat_map = None
 
         for i, block in enumerate(self.encoder.backbone.blocks):
             if i == len(self.encoder.backbone.blocks) - self.num_blocks:
@@ -197,7 +243,7 @@ class EoMT_EXT(nn.Module):
                 self.masked_attn_enabled
                 and i >= len(self.encoder.backbone.blocks) - self.num_blocks
             ):
-                mask_logits, class_logits = self._predict(self.encoder.backbone.norm(x))
+                mask_logits, class_logits, _ = self._predict(self.encoder.backbone.norm(x))
                 mask_logits_per_layer.append(mask_logits)
                 class_logits_per_layer.append(class_logits)
 
@@ -219,25 +265,26 @@ class EoMT_EXT(nn.Module):
             elif hasattr(block, "layer_scale2"):
                 x = x + block.layer_scale2(mlp_out)
 
-        mask_logits, class_logits = self._predict(self.encoder.backbone.norm(x))
+        # Final prediction
+        mask_logits, class_logits, last_feat_map = self._predict(self.encoder.backbone.norm(x))
         mask_logits_per_layer.append(mask_logits)
         class_logits_per_layer.append(class_logits)
 
+        # Return (mask_list, class_list, last_feat_map)
         return (
             mask_logits_per_layer,
-            class_logits_per_layer
+            class_logits_per_layer,
+            last_feat_map
         )
 
-    def compute_anomaly_score(self, mask_logits, class_logits, img_size):
+    def compute_anomaly_score(self, mask_logits, class_logits, img_size, features=None):
         """
         Computes the pixel-wise anomaly score using the internal anomaly_head.
-        This encapsulates the 'Bridge' logic (converting sparse queries to dense features)
-        and the MLP forward pass.
-
         Args:
             mask_logits: [B, Q, H_feat, W_feat]
             class_logits: [B, Q, C]
             img_size: tuple (H, W) target resolution
+            features: [B, C_embed, H_grid, W_grid] Visual features from backbone
         """
         # 1. Feature Extraction (The Bridge)
         mask_logits_up = F.interpolate(mask_logits, size=img_size, mode="bilinear", align_corners=False)
@@ -266,12 +313,11 @@ class EoMT_EXT(nn.Module):
         msp = 1.0 - max_prob
 
         # Stack Features: [B, H, W, 4]
-        features = torch.stack([max_prob, entropy, energy_proxy, msp], dim=-1)
+        stat_features = torch.stack([max_prob, entropy, energy_proxy, msp], dim=-1)
 
         # Normalize features
-        if features.size(0) > 1: # Batch norm style requires batch > 1 or careful handling
-             # Simple instance-like normalization to keep MLP stable
-             features = (features - features.mean(dim=(1,2), keepdim=True)) / (features.std(dim=(1,2), keepdim=True) + 1e-6)
+        if stat_features.size(0) > 1:
+             stat_features = (stat_features - stat_features.mean(dim=(1,2), keepdim=True)) / (stat_features.std(dim=(1,2), keepdim=True) + 1e-6)
 
-        # 3. MLP Forward
-        return self.anomaly_head(features)
+        # 3. MLP Forward with Visual features
+        return self.anomaly_head(stat_features, features)

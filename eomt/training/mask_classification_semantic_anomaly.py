@@ -156,22 +156,25 @@ class MCS_Anomaly(MaskClassificationSemantic):
         # 1. Forward Pass of Backbone (frozen)
         # We only need the valid output
         with torch.no_grad():
-            outputs = self.network(imgs)
-            # outputs is tuple: (mask_logits_list, class_logits_list)
-            # We want the LAST layer output
-            mask_logits = outputs[0][-1]  # [B, Q, H/4, W/4] usually
-            class_logits = outputs[1][-1]  # [B, Q, C]
+             outputs = self.network(imgs)
+             # outputs is tuple: (mask_logits_list, class_logits_list, features_map)
+             # We want the LAST layer output
+             mask_logits = outputs[0][-1] # [B, Q, H/4, W/4] usually
+             class_logits = outputs[1][-1] # [B, Q, C]
+             # New feature output from EoMT_EXT
+             vis_features = outputs[2] # [B, C_embed, H_grid, W_grid]
 
         # 2. Compute Anomaly Score using the unified model method
         # This handles Feature Extraction + MLP
         b, _, h, w = imgs.shape
 
-        # Since we are training the head, we must allow gradients here if the method backprops to head
-        # The head is part of self.network.
-        # But self.network(imgs) was under no_grad().
-        # Wait, compute_anomaly_score calls self.network.anomaly_head. It needs gradients.
-
-        anomaly_logits = self.network.compute_anomaly_score(mask_logits, class_logits, (h, w))  # [B, H, W, 1]
+        # Pass features to the anomaly head computation
+        anomaly_logits = self.network.compute_anomaly_score(
+            mask_logits,
+            class_logits,
+            (h, w),
+            features=vis_features
+        ) # [B, H, W, 1]
 
         # 4. Prepare Targets (Binary Anomaly Mask)
         gt_anomaly_mask = self._prepare_dense_targets(targets, (h, w))
@@ -240,7 +243,8 @@ class MCS_Anomaly(MaskClassificationSemantic):
         # Let's check EoMT_EXT.forward return value.
         outputs = self.network(crops)
         # Assuming EoMT_EXT returns (mask_list, class_list) as standard mask transformer
-        mask_logits_per_layer, class_logits_per_layer = outputs
+        # NEW: returns (mask_logits_per_layer, class_logits_per_layer, last_feat_map)
+        mask_logits_per_layer, class_logits_per_layer, last_feat_map = outputs
 
         # We need anomaly scores per layer too if we want to visualize/eval per layer
         # But currently, we compute anomaly scores on the fly.
@@ -250,11 +254,22 @@ class MCS_Anomaly(MaskClassificationSemantic):
         # Loop through layers
         # Construct anomaly_logits_per_layer manually
         anomaly_logits_per_layer = []
-        for masks, classes in zip(mask_logits_per_layer, class_logits_per_layer):
-            # Need image size of crops? crops is a tensor [B, C, H, W]
-            h, w = crops.shape[-2:]
-            anomaly_logits = self.network.compute_anomaly_score(masks, classes, (h, w))
-            anomaly_logits_per_layer.append(anomaly_logits)
+        for i, (masks, classes) in enumerate(zip(mask_logits_per_layer, class_logits_per_layer)):
+             # Need image size of crops? crops is a tensor [B, C, H, W]
+             h, w = crops.shape[-2:]
+
+             # Only use features for the FINAL layer (where they match)
+             # Intermediate layers don't have corresponding features returned by current forward()
+             # So we pass None for intermediate layers
+             feats_to_use = last_feat_map if i == len(mask_logits_per_layer) - 1 else None
+
+             anomaly_logits = self.network.compute_anomaly_score(
+                 masks,
+                 classes,
+                 (h, w),
+                 features=feats_to_use
+             )
+             anomaly_logits_per_layer.append(anomaly_logits)
 
         for i, (mask_logits, class_logits, anomaly_logits) in enumerate(
                 list(zip(mask_logits_per_layer, class_logits_per_layer, anomaly_logits_per_layer))
