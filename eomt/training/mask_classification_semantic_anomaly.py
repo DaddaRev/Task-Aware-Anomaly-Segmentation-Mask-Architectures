@@ -2,6 +2,7 @@ import io
 
 import torch
 from torch import nn
+from torchmetrics.classification import MulticlassJaccardIndex
 from torchvision.utils import save_image
 from typing import Optional, List
 from .mask_classification_loss import MaskClassificationLoss
@@ -89,7 +90,22 @@ class MCS_Anomaly(MaskClassificationSemantic):
         )
 
         num_layers = self.network.num_blocks + 1 if getattr(self.network, 'masked_attn_enabled', False) else 1
-        self.init_metrics_semantic(self.ignore_idx, num_layers)
+
+        # Override metrics initialization to use Anomaly-specific metrics (Binary Jaccard/IoU)
+        # Standard MulticlassJaccardIndex initialized in super() uses num_classes=19
+        # But here we evaluate Anomaly (Class 1) vs Normal (Class 0).
+        # We need to re-initialize metrics for 2 classes (Binary segmentation essentially).
+        self.metrics = nn.ModuleList(
+            [
+                MulticlassJaccardIndex(
+                    num_classes=2,
+                    validate_args=False,
+                    ignore_index=ignore_idx,
+                    average=None,
+                )
+                for _ in range(num_layers)
+            ]
+        )
 
         self.register_buffer("pixel_mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
         self.register_buffer("pixel_std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
@@ -134,6 +150,7 @@ class MCS_Anomaly(MaskClassificationSemantic):
 
     def training_step(self, batch, batch_idx):
         imgs, targets = batch
+        targets = self._unstack_targets(imgs, targets)
 
         # 1. Forward Pass of Backbone (frozen)
         # We only need the valid output
@@ -265,6 +282,19 @@ class MCS_Anomaly(MaskClassificationSemantic):
             mask_logits_up = F.interpolate(mask_logits, size=(h, w), mode="bilinear", align_corners=False)
 
             logits = self.revert_window_logits_semantic(crop_logits, origins, img_sizes)
+
+            # Ensure targets are prepared for dense metrics (similar to _prepare_dense_targets but keep batch dimension for update_metrics)
+            # update_metrics_semantic expects targets in standard semantic format [B, H, W]
+            # Our targets from validation_step(batch) are already per-pixel [B, H, W] via to_per_pixel_targets_semantic
+            # But the values in target are: 0 (BG), 1 (Anomaly), 255 (Void).
+            # The logic in to_per_pixel_targets_semantic handles standard segmentation labels.
+            # Anomaly dataset target dict has "masks" and "labels".
+            # to_per_pixel_targets_semantic calls _convert_mask_targets_to_pixel.
+
+            # Since we re-initialized self.metrics with num_classes=2, we must ensure targets only contain 0, 1, and 255 (ignore).
+            # The AnomalyInternalDataset produces exactly these (plus 255).
+            # So standard update_metrics_semantic should work if shapes align.
+            # logits is [B, 2, H, W]. target is [B, H, W].
 
             self.update_metrics_semantic(logits, targets, i)
 
