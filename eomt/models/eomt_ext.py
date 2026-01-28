@@ -315,9 +315,11 @@ class EoMT_EXT(nn.Module):
         # Stack Features: [B, H, W, 4]
         stat_features = torch.stack([max_prob, entropy, energy_proxy, msp], dim=-1)
 
-        # Normalize features
-        if stat_features.size(0) > 1:
-             stat_features = (stat_features - stat_features.mean(dim=(1,2), keepdim=True)) / (stat_features.std(dim=(1,2), keepdim=True) + 1e-6)
+        # Normalize features (Standardization per image over H, W)
+        # We process each sample in the batch independently to match inference behavior
+        mean = stat_features.mean(dim=(1, 2), keepdim=True) # [B, 1, 1, 4]
+        std = stat_features.std(dim=(1, 2), keepdim=True)   # [B, 1, 1, 4]
+        stat_features = (stat_features - mean) / (std + 1e-6)
 
         # 3. MLP Forward with Visual features
         return self.anomaly_head(stat_features, features)
