@@ -12,6 +12,7 @@ import torch.nn.functional as F
 # Fix unresolved reference: Import MaskClassificationSemantic
 from .mask_classification_semantic import MaskClassificationSemantic
 
+
 class MCS_Anomaly(MaskClassificationSemantic):
 
     def __init__(
@@ -84,7 +85,7 @@ class MCS_Anomaly(MaskClassificationSemantic):
             mask_coefficient=mask_coefficient,
             dice_coefficient=dice_coefficient,
             class_coefficient=class_coefficient,
-            num_labels=2, # Normal (0), Anomaly (1) + NoObject (2)
+            num_labels=2,  # Normal (0), Anomaly (1) + NoObject (2)
             no_object_coefficient=no_object_coefficient,
             bg_coefficient=bg_coefficient,
         )
@@ -116,13 +117,13 @@ class MCS_Anomaly(MaskClassificationSemantic):
 
         # Assuming the unified model now has this attribute
         if hasattr(self.network, 'anomaly_head'):
-             print("Unfreezing anomaly_head inside network...")
-             for param in self.network.anomaly_head.parameters():
-                 param.requires_grad = True
+            print("Unfreezing anomaly_head inside network...")
+            for param in self.network.anomaly_head.parameters():
+                param.requires_grad = True
         else:
-             print("WARNING: 'anomaly_head' not found in network. Training might fail.")
+            print("WARNING: 'anomaly_head' not found in network. Training might fail.")
 
-        self.lr = 1e-4 # Maybe smaller for just the head?
+        self.lr = 1e-4  # Maybe smaller for just the head?
         self.weight_decay = 0.05
 
         # --- Balanced Strategy ---
@@ -155,11 +156,11 @@ class MCS_Anomaly(MaskClassificationSemantic):
         # 1. Forward Pass of Backbone (frozen)
         # We only need the valid output
         with torch.no_grad():
-             outputs = self.network(imgs)
-             # outputs is tuple: (mask_logits_list, class_logits_list)
-             # We want the LAST layer output
-             mask_logits = outputs[0][-1] # [B, Q, H/4, W/4] usually
-             class_logits = outputs[1][-1] # [B, Q, C]
+            outputs = self.network(imgs)
+            # outputs is tuple: (mask_logits_list, class_logits_list)
+            # We want the LAST layer output
+            mask_logits = outputs[0][-1]  # [B, Q, H/4, W/4] usually
+            class_logits = outputs[1][-1]  # [B, Q, C]
 
         # 2. Compute Anomaly Score using the unified model method
         # This handles Feature Extraction + MLP
@@ -170,7 +171,7 @@ class MCS_Anomaly(MaskClassificationSemantic):
         # But self.network(imgs) was under no_grad().
         # Wait, compute_anomaly_score calls self.network.anomaly_head. It needs gradients.
 
-        anomaly_logits = self.network.compute_anomaly_score(mask_logits, class_logits, (h, w)) # [B, H, W, 1]
+        anomaly_logits = self.network.compute_anomaly_score(mask_logits, class_logits, (h, w))  # [B, H, W, 1]
 
         # 4. Prepare Targets (Binary Anomaly Mask)
         gt_anomaly_mask = self._prepare_dense_targets(targets, (h, w))
@@ -179,22 +180,22 @@ class MCS_Anomaly(MaskClassificationSemantic):
         loss = F.binary_cross_entropy_with_logits(
             anomaly_logits.squeeze(-1),
             gt_anomaly_mask.float(),
-            pos_weight=torch.tensor([10.0]).to(imgs.device) # Handle class imbalance
+            pos_weight=torch.tensor([10.0]).to(imgs.device)  # Handle class imbalance
         )
 
         self.log("train_loss_anomaly", loss)
 
         # Logging / Visualization (Every N steps)
         if batch_idx % 100 == 0:
-             self.plot_semantic(
-                 imgs[0],
-                 gt_anomaly_mask[0].cpu().numpy(),
-                 anomaly_logits[0].sigmoid().detach().cpu().numpy(),
-                 None, # Baseline logits (optional)
-                 "train",
-                 0,
-                 batch_idx
-             )
+            self.plot_semantic(
+                imgs[0],
+                gt_anomaly_mask[0].cpu().numpy(),
+                anomaly_logits[0].sigmoid().detach().cpu().numpy(),
+                None,  # Baseline logits (optional)
+                "train",
+                0,
+                batch_idx
+            )
 
         return loss
 
@@ -206,20 +207,20 @@ class MCS_Anomaly(MaskClassificationSemantic):
             # t["masks"] and t["labels"] could be on CPU or GPU
             # Find indices where label == 1 (Anomaly)
             if "labels" in t and "masks" in t:
-                 # Ensure labels are on correct device
-                 labels = t["labels"].to(self.device)
-                 # Adjust label index if needed (depending on your dataset, 1 might be anomaly or a specific class)
-                 # Assuming 1 is the anomaly class ID as per your previous setup?
-                 # Or check dsets/training_anomaly.py to confirm anomaly class ID.
-                 # Usually 0 is void, 1 is anomaly? Or standard classes?
-                 # If anomaly is a specific class ID:
-                 anomaly_indices = (labels == 1).nonzero(as_tuple=True)[0]
+                # Ensure labels are on correct device
+                labels = t["labels"].to(self.device)
+                # Adjust label index if needed (depending on your dataset, 1 might be anomaly or a specific class)
+                # Assuming 1 is the anomaly class ID as per your previous setup?
+                # Or check dsets/training_anomaly.py to confirm anomaly class ID.
+                # Usually 0 is void, 1 is anomaly? Or standard classes?
+                # If anomaly is a specific class ID:
+                anomaly_indices = (labels == 1).nonzero(as_tuple=True)[0]
 
-                 if len(anomaly_indices) > 0:
-                     anomaly_masks = t["masks"][anomaly_indices].to(self.device) # [K, H, W]
-                     if anomaly_masks.numel() > 0:
-                          combined = anomaly_masks.sum(dim=0).bool()
-                          gt_tensor[i] = combined.float()
+                if len(anomaly_indices) > 0:
+                    anomaly_masks = t["masks"][anomaly_indices].to(self.device)  # [K, H, W]
+                    if anomaly_masks.numel() > 0:
+                        combined = anomaly_masks.sum(dim=0).bool()
+                        gt_tensor[i] = combined.float()
 
         return gt_tensor
 
@@ -251,10 +252,10 @@ class MCS_Anomaly(MaskClassificationSemantic):
         # Construct anomaly_logits_per_layer manually
         anomaly_logits_per_layer = []
         for masks, classes in zip(mask_logits_per_layer, class_logits_per_layer):
-             # Need image size of crops? crops is a tensor [B, C, H, W]
-             h, w = crops.shape[-2:]
-             anomaly_logits = self.network.compute_anomaly_score(masks, classes, (h, w))
-             anomaly_logits_per_layer.append(anomaly_logits)
+            # Need image size of crops? crops is a tensor [B, C, H, W]
+            h, w = crops.shape[-2:]
+            anomaly_logits = self.network.compute_anomaly_score(masks, classes, (h, w))
+            anomaly_logits_per_layer.append(anomaly_logits)
 
         for i, (mask_logits, class_logits, anomaly_logits) in enumerate(
                 list(zip(mask_logits_per_layer, class_logits_per_layer, anomaly_logits_per_layer))
@@ -274,9 +275,9 @@ class MCS_Anomaly(MaskClassificationSemantic):
             # Softmax([0, L]) -> P(0) = 1/(1+e^L), P(1) = e^L/(1+e^L) = sigmoid(L).
             # So setting NormalLogit = 0 and AnomalyLogit = L works for Softmax to recover Sigmoid probabilities.
 
-            anom_logit = anomaly_logits.permute(0, 3, 1, 2) # [B, 1, H, W]
+            anom_logit = anomaly_logits.permute(0, 3, 1, 2)  # [B, 1, H, W]
             zeros = torch.zeros_like(anom_logit)
-            crop_logits = torch.cat([zeros, anom_logit], dim=1) # [B, 2, H, W]
+            crop_logits = torch.cat([zeros, anom_logit], dim=1)  # [B, 2, H, W]
 
             # Upsample mask_logits to crop size for Baseline calculation
             mask_logits_up = F.interpolate(mask_logits, size=(h, w), mode="bilinear", align_corners=False)
@@ -300,21 +301,21 @@ class MCS_Anomaly(MaskClassificationSemantic):
 
             # Use a slightly different batch index for visualization condition to avoid flooding logs
             if batch_idx in [0, 8, 16] and layer_idx == 0:
-                 self.plot_semantic_new(
-                     imgs[0],
-                     targets[0],
-                     logits[0],
-                     # For the 4th panel (Semantic), we need to reconstruct semantic segmentation from frozen head
-                     self._compute_baseline_msp(
-                         mask_logits_up[0:1], # Keep batch dim: [1, Q, H, W]
-                         class_logits[0:1], # [1, Q, C]
-                         [origins[0]], # window info
-                         [img_sizes[0]] # window info
-                     )[0],
-                     log_prefix,
-                     i,
-                     batch_idx
-                 )
+                self.plot_semantic_new(
+                    imgs[0],
+                    targets[0],
+                    logits[0],
+                    # For the 4th panel (Semantic), we need to reconstruct semantic segmentation from frozen head
+                    self._compute_baseline_msp(
+                        mask_logits_up[0:1],  # Keep batch dim: [1, Q, H, W]
+                        class_logits[0:1],  # [1, Q, C]
+                        [origins[0]],  # window info
+                        [img_sizes[0]]  # window info
+                    )[0],
+                    log_prefix,
+                    i,
+                    batch_idx
+                )
 
     @torch.compiler.disable
     def plot_semantic_new(self, img, target, logits, fourth_panel_data, prefix, layer_idx, batch_idx):
@@ -567,33 +568,33 @@ class MCS_Anomaly(MaskClassificationSemantic):
         return colored_img.permute(2, 0, 1)
 
     def _compute_baseline_msp(self, mask_logits, class_logits, origins, img_sizes):
-            """
+        """
             Compute baseline anomaly detection using Maximum Softmax Probability (MSP)
             from frozen class_head predictions.
 
             MSP approach: Anomaly = 1 - max_prob(semantic_classes)
             Lower confidence on semantic classes → Higher anomaly score
             """
-            # Get semantic probabilities from frozen class_head [B, Q, 20]
-            semantic_probs = F.softmax(class_logits, dim=-1)
+        # Get semantic probabilities from frozen class_head [B, Q, 20]
+        semantic_probs = F.softmax(class_logits, dim=-1)
 
-            # Max probability across 19 semantic classes (exclude void class at index 19)
-            max_semantic_prob, _ = semantic_probs[..., :-1].max(dim=-1)  # [B, Q]
+        # Max probability across 19 semantic classes (exclude void class at index 19)
+        max_semantic_prob, _ = semantic_probs[..., :-1].max(dim=-1)  # [B, Q]
 
-            # MSP anomaly score: Low semantic confidence = High anomaly
-            # Create binary classification: [Normal, Anomaly]
-            baseline_probs = torch.stack([
-                max_semantic_prob,           # Normal (high semantic confidence)
-                1.0 - max_semantic_prob      # Anomaly (low semantic confidence)
-            ], dim=-1)  # [B, Q, 2]
+        # MSP anomaly score: Low semantic confidence = High anomaly
+        # Create binary classification: [Normal, Anomaly]
+        baseline_probs = torch.stack([
+            max_semantic_prob,  # Normal (high semantic confidence)
+            1.0 - max_semantic_prob  # Anomaly (low semantic confidence)
+        ], dim=-1)  # [B, Q, 2]
 
-            # Combine with masks same as anomaly head
-            crop_logits = torch.einsum(
-                "bqhw, bqc -> bchw",
-                mask_logits.sigmoid(),
-                baseline_probs
-            )
+        # Combine with masks same as anomaly head
+        crop_logits = torch.einsum(
+            "bqhw, bqc -> bchw",
+            mask_logits.sigmoid(),
+            baseline_probs
+        )
 
-            # Revert windowing
-            logits = self.revert_window_logits_semantic(crop_logits, origins, img_sizes)
-            return logits
+        # Revert windowing
+        logits = self.revert_window_logits_semantic(crop_logits, origins, img_sizes)
+        return logits

@@ -563,13 +563,19 @@ class LightningModule(lightning.LightningModule):
     ):
         fig, axes = plt.subplots(1, 3, figsize=[15, 5], sharex=True, sharey=True)
 
-        axes[0].imshow(img.cpu().numpy().transpose(1, 2, 0))
+        if isinstance(img, torch.Tensor):
+            img = img.cpu().numpy()
+        axes[0].imshow(img.transpose(1, 2, 0))
         axes[0].axis("off")
 
-        target = target.cpu().numpy()
+        if isinstance(target, torch.Tensor):
+            target = target.cpu().numpy()
         unique_classes = np.unique(target)
 
-        preds = torch.argmax(logits, dim=0).cpu().numpy()
+        if isinstance(logits, torch.Tensor):
+            preds = torch.argmax(logits, dim=0).cpu().numpy()
+        else:
+            preds = np.argmax(logits, axis=0) # Assume numpy array if not tensor
         unique_classes = np.unique(np.concatenate((unique_classes, np.unique(preds))))
 
         num_classes = len(unique_classes)
