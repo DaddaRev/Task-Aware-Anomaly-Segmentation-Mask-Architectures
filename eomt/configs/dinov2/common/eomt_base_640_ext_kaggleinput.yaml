@@ -24,7 +24,7 @@ model:
     # attn_mask_annealing_end_steps: ...
 
     # Learning parameters (important for fine-tuning)
-    lr: 1.0e-4  # from 5.0e-4
+    lr: 1.0e-5  # from 5.0e-4
     weight_decay: 0.1  # from 0.05
     poly_power: 0.9
     warmup_steps: [200, 500]  # Reduced for small dataset (from [100, 200])
