@@ -156,13 +156,13 @@ class MCS_Anomaly(MaskClassificationSemantic):
         # 1. Forward Pass of Backbone (frozen)
         # We only need the valid output
         with torch.no_grad():
-             outputs = self.network(imgs)
-             # outputs is tuple: (mask_logits_list, class_logits_list, features_map)
-             # We want the LAST layer output
-             mask_logits = outputs[0][-1] # [B, Q, H/4, W/4] usually
-             class_logits = outputs[1][-1] # [B, Q, C]
-             # New feature output from EoMT_EXT
-             vis_features = outputs[2] # [B, C_embed, H_grid, W_grid]
+            outputs = self(imgs)
+            # outputs is tuple: (mask_logits_list, class_logits_list, features_map)
+            # We want the LAST layer output
+            mask_logits = outputs[0][-1] # [B, Q, H/4, W/4] usually
+            class_logits = outputs[1][-1] # [B, Q, C]
+            # New feature output from EoMT_EXT
+            vis_features = outputs[2] # [B, C_embed, H_grid, W_grid]
 
         # 2. Compute Anomaly Score using the unified model method
         # This handles Feature Extraction + MLP
