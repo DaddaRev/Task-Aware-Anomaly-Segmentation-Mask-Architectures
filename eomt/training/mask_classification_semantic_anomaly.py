@@ -245,22 +245,24 @@ class MCS_Anomaly(MaskClassificationSemantic):
             # i is layer_idx
             layer_idx = i
 
-            probs_anomaly = anomaly_logits.softmax(dim=-1)
+            h, w = crops.shape[-2:]
 
             # --- ANOMALY HEAD DIRECT PREDICTION ---
-            # anomaly_head output: [Normal, Anomaly, NoObject]
-            # We want: Channel 0 = Normal, Channel 1 = Anomaly
-            valid_probs = probs_anomaly[..., :2]
+            # anomaly_logits is [B, H_crop, W_crop, 1].
+            # We want crop_logits: [B, 2, H_crop, W_crop]
+            # Channel 0: Normal Logit (assumed 0 or -L) -> let's use 0 so prob(Normal) = 1/(1+exp(L)) if L is anomaly score ???
+            # Ideally:
+            # P(Anomaly) = sigmoid(L)
+            # P(Normal) = 1 - sigmoid(L) = sigmoid(-L)
+            # Softmax([0, L]) -> P(0) = 1/(1+e^L), P(1) = e^L/(1+e^L) = sigmoid(L).
+            # So setting NormalLogit = 0 and AnomalyLogit = L works for Softmax to recover Sigmoid probabilities.
 
-            mask_logits = F.interpolate(mask_logits, self.img_size, mode="bilinear")
+            anom_logit = anomaly_logits.permute(0, 3, 1, 2) # [B, 1, H, W]
+            zeros = torch.zeros_like(anom_logit)
+            crop_logits = torch.cat([zeros, anom_logit], dim=1) # [B, 2, H, W]
 
-            # Combine Mask Probs (sigmoid) with Class Probs
-            # [B, Q, H, W] x [B, Q, 2] -> [B, 2, H, W]
-            crop_logits = torch.einsum(
-               "bqhw, bqc -> bchw",
-               mask_logits.sigmoid(),
-               valid_probs
-            )
+            # Upsample mask_logits to crop size for Baseline calculation
+            mask_logits_up = F.interpolate(mask_logits, size=(h, w), mode="bilinear", align_corners=False)
 
             logits = self.revert_window_logits_semantic(crop_logits, origins, img_sizes)
 
@@ -274,7 +276,7 @@ class MCS_Anomaly(MaskClassificationSemantic):
                      logits[0],
                      # For the 4th panel (Semantic), we need to reconstruct semantic segmentation from frozen head
                      self._compute_baseline_msp(
-                         mask_logits[0:1], # Keep batch dim: [1, Q, H, W]
+                         mask_logits_up[0:1], # Keep batch dim: [1, Q, H, W]
                          class_logits[0:1], # [1, Q, C]
                          [origins[0]], # window info
                          [img_sizes[0]] # window info
