@@ -48,5 +48,5 @@ data:
         masks_dir: labels_masks
         image_glob: "*.jpg"
         mask_ext: "png"
-        gt_format: binary_255_is_ood
+        gt_format: binary_any_nonzero_is_ood_void255
         skip_no_ood: true
