@@ -238,7 +238,7 @@ class MCS_Anomaly(MaskClassificationSemantic):
         # We need to update EoMT_EXT.forward signature.
         # But inside MCS training_step we used self.network(imgs) and picked outputs[0][-1].
         # Let's check EoMT_EXT.forward return value.
-        outputs = self.network(crops)
+        outputs = self(crops)
         # Assuming EoMT_EXT returns (mask_list, class_list) as standard mask transformer
         mask_logits_per_layer, class_logits_per_layer = outputs
 
