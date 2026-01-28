@@ -156,7 +156,7 @@ class MCS_Anomaly(MaskClassificationSemantic):
         # 1. Forward Pass of Backbone (frozen)
         # We only need the valid output
         with torch.no_grad():
-            outputs = self.network(imgs)
+            outputs = self(imgs)
             # outputs is tuple: (mask_logits_list, class_logits_list)
             # We want the LAST layer output
             mask_logits = outputs[0][-1]  # [B, Q, H/4, W/4] usually
