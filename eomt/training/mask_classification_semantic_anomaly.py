@@ -46,6 +46,7 @@ class MCS_Anomaly(MaskClassificationSemantic):
 
         no_object_coefficient = 1.0
         bg_coefficient = 1.0
+        print("learning rate:", lr)
 
         if warmup_steps is None:
             warmup_steps = [500, 1000]
@@ -78,17 +79,17 @@ class MCS_Anomaly(MaskClassificationSemantic):
             **kwargs
         )
 
-        self.criterion_anomalymask = MaskClassificationLoss(
-            num_points=num_points,
-            oversample_ratio=oversample_ratio,
-            importance_sample_ratio=importance_sample_ratio,
-            mask_coefficient=mask_coefficient,
-            dice_coefficient=dice_coefficient,
-            class_coefficient=class_coefficient,
-            num_labels=2,  # Normal (0), Anomaly (1) + NoObject (2)
-            no_object_coefficient=no_object_coefficient,
-            bg_coefficient=bg_coefficient,
-        )
+        # self.criterion_anomalymask = MaskClassificationLoss(
+        #     num_points=num_points,
+        #     oversample_ratio=oversample_ratio,
+        #     importance_sample_ratio=importance_sample_ratio,
+        #     mask_coefficient=mask_coefficient,
+        #     dice_coefficient=dice_coefficient,
+        #     class_coefficient=class_coefficient,
+        #     num_labels=2,  # Normal (0), Anomaly (1) + NoObject (2)
+        #     no_object_coefficient=no_object_coefficient,
+        #     bg_coefficient=bg_coefficient,
+        # )
 
         num_layers = self.network.num_blocks + 1 if getattr(self.network, 'masked_attn_enabled', False) else 1
 

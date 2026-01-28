@@ -1,5 +1,6 @@
 trainer:
-  max_epochs: 5
+  max_epochs: 2
+  lr: 1.0e-6
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
