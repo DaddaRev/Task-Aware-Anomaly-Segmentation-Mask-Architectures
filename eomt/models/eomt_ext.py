@@ -31,7 +31,7 @@ class PixelAnomalyHead(nn.Module):
         self.mlp = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
-            nn.BatchNorm1d(hidden_dim),
+            # nn.BatchNorm1d(hidden_dim), # Removed to avoid batch dependency/instability
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.ReLU(),
@@ -316,10 +316,12 @@ class EoMT_EXT(nn.Module):
         stat_features = torch.stack([max_prob, entropy, energy_proxy, msp], dim=-1)
 
         # Normalize features (Standardization per image over H, W)
-        # We process each sample in the batch independently to match inference behavior
-        mean = stat_features.mean(dim=(1, 2), keepdim=True) # [B, 1, 1, 4]
-        std = stat_features.std(dim=(1, 2), keepdim=True)   # [B, 1, 1, 4]
-        stat_features = (stat_features - mean) / (std + 1e-6)
+        # REMOVING NORMALIZATION:
+        # 1. It causes instability when variance is low (std -> 0), amplifying noise.
+        # 2. It removes absolute uncertainty info (all-confident crop looks same as all-uncertain crop).
+        # mean = stat_features.mean(dim=(1, 2), keepdim=True) # [B, 1, 1, 4]
+        # std = stat_features.std(dim=(1, 2), keepdim=True)   # [B, 1, 1, 4]
+        # stat_features = (stat_features - mean) / (std + 1e-6)
 
         # 3. MLP Forward with Visual features
         return self.anomaly_head(stat_features, features)

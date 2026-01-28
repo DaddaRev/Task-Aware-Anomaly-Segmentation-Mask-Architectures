@@ -176,15 +176,20 @@ class MCS_Anomaly(MaskClassificationSemantic):
             features=vis_features
         ) # [B, H, W, 1]
 
-        # 4. Prepare Targets (Binary Anomaly Mask)
-        gt_anomaly_mask = self._prepare_dense_targets(targets, (h, w))
+        # 4. Prepare Targets (Binary Anomaly Mask + Valid Mask)
+        gt_anomaly_mask, valid_mask = self._prepare_dense_targets(targets, (h, w))
 
-        # 5. Loss (BCE)
-        loss = F.binary_cross_entropy_with_logits(
+        # 5. Loss (BCE) handling ignored regions
+        # Use reduction='none' to get pixel-wise loss, then mask it
+        loss_pixel = F.binary_cross_entropy_with_logits(
             anomaly_logits.squeeze(-1),
             gt_anomaly_mask.float(),
-            pos_weight=torch.tensor([10.0]).to(imgs.device)  # Handle class imbalance
+            pos_weight=torch.tensor([10.0]).to(imgs.device),  # Handle class imbalance
+            reduction='none'
         )
+
+        # Apply valid mask (1.0 for valid, 0.0 for ignore)
+        loss = (loss_pixel * valid_mask).sum() / (valid_mask.sum() + 1e-6)
 
         self.log("train_loss_anomaly", loss)
 
@@ -204,27 +209,36 @@ class MCS_Anomaly(MaskClassificationSemantic):
     def _prepare_dense_targets(self, targets_list, shape):
         b, h, w = len(targets_list), shape[0], shape[1]
         gt_tensor = torch.zeros((b, h, w), device=self.device)
+        valid_mask = torch.ones((b, h, w), device=self.device)
 
         for i, t in enumerate(targets_list):
             # t["masks"] and t["labels"] could be on CPU or GPU
-            # Find indices where label == 1 (Anomaly)
             if "labels" in t and "masks" in t:
                 # Ensure labels are on correct device
                 labels = t["labels"].to(self.device)
-                # Adjust label index if needed (depending on your dataset, 1 might be anomaly or a specific class)
-                # Assuming 1 is the anomaly class ID as per your previous setup?
-                # Or check dsets/training_anomaly.py to confirm anomaly class ID.
-                # Usually 0 is void, 1 is anomaly? Or standard classes?
-                # If anomaly is a specific class ID:
-                anomaly_indices = (labels == 1).nonzero(as_tuple=True)[0]
+                masks = t["masks"].to(self.device)
 
+                # 1. Handle Anomaly Class (Label 1)
+                anomaly_indices = (labels == 1).nonzero(as_tuple=True)[0]
                 if len(anomaly_indices) > 0:
-                    anomaly_masks = t["masks"][anomaly_indices].to(self.device)  # [K, H, W]
+                    anomaly_masks = masks[anomaly_indices]
                     if anomaly_masks.numel() > 0:
                         combined = anomaly_masks.sum(dim=0).bool()
                         gt_tensor[i] = combined.float()
 
-        return gt_tensor
+                # 2. Handle Ignore/Void Class (Label 255/ignore_idx, or typically the void class)
+                # We assume self.ignore_idx is what defines void.
+                # In training_anomaly.py we see labels [0, 1, 255].
+                # If specific label == self.ignore_idx, mask it out
+                ignore_indices = (labels == self.ignore_idx).nonzero(as_tuple=True)[0]
+                if len(ignore_indices) > 0:
+                    ignore_masks = masks[ignore_indices]
+                    if ignore_masks.numel() > 0:
+                         combined_ignore = ignore_masks.sum(dim=0).bool()
+                         # Set valid_mask to 0 where ignore class is present
+                         valid_mask[i][combined_ignore] = 0.0
+
+        return gt_tensor, valid_mask
 
     def validation_step(self, batch, batch_idx=None, log_prefix=None):
         imgs, targets = batch
