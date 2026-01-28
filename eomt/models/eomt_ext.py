@@ -20,7 +20,7 @@ class PixelAnomalyHead(nn.Module):
         self.mlp = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
-            nn.BatchNorm1d(hidden_dim),
+            #nn.BatchNorm1d(hidden_dim),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.ReLU(),
@@ -269,9 +269,9 @@ class EoMT_EXT(nn.Module):
         features = torch.stack([max_prob, entropy, energy_proxy, msp], dim=-1)
 
         # Normalize features
-        if features.size(0) > 1: # Batch norm style requires batch > 1 or careful handling
-             # Simple instance-like normalization to keep MLP stable
-             features = (features - features.mean(dim=(1,2), keepdim=True)) / (features.std(dim=(1,2), keepdim=True) + 1e-6)
+        # if features.size(0) > 1: # Batch norm style requires batch > 1 or careful handling
+        #      # Simple instance-like normalization to keep MLP stable
+        #      features = (features - features.mean(dim=(1,2), keepdim=True)) / (features.std(dim=(1,2), keepdim=True) + 1e-6)
 
         # 3. MLP Forward
         return self.anomaly_head(features)
