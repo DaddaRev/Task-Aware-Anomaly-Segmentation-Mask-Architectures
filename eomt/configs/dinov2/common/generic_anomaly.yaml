@@ -49,4 +49,4 @@ data:
         image_glob: "*.jpg"
         mask_ext: "png"
         gt_format: binary_any_nonzero_is_ood_void255
-        skip_no_ood: true
+        skip_no_ood: false
