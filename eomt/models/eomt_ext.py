@@ -20,7 +20,6 @@ class PixelAnomalyHead(nn.Module):
 
         self.feature_dim = feature_dim
 
-        # If we use visual features, we project them down first to avoid massive MLP
         if feature_dim > 0:
             self.feature_proj = nn.Sequential(
                 nn.Conv2d(feature_dim, 32, kernel_size=1),
@@ -31,7 +30,6 @@ class PixelAnomalyHead(nn.Module):
         self.mlp = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
-            # nn.BatchNorm1d(hidden_dim), # Removed to avoid batch dependency/instability
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.ReLU(),
@@ -40,28 +38,20 @@ class PixelAnomalyHead(nn.Module):
         )
 
     def forward(self, x, features=None):
-        # x: [B, H, W, 4] (Logit stats)
-        # features: [B, C, H, W] (Visual features from backbone)
-
         b, h, w, _ = x.shape
 
         if self.feature_dim > 0 and features is not None:
-            # 1. Project features [B, C_in, H, W] -> [B, 32, H, W]
             vis_feat = self.feature_proj(features)
 
-            # 2. Resize to match x if needed (usually x is full res or user defined, features are lower res)
             if vis_feat.shape[-2:] != (h, w):
                 vis_feat = F.interpolate(vis_feat, size=(h, w), mode="bilinear", align_corners=False)
 
-            # 3. Permute to [B, H, W, 32]
             vis_feat = vis_feat.permute(0, 2, 3, 1)
-
-            # 4. Concatenate: [B, H, W, 4+32]
             x = torch.cat([x, vis_feat], dim=-1)
 
         b, h, w, c = x.shape
-        x_flat = x.reshape(-1, c) # [N, C_total]
-        out = self.mlp(x_flat)    # [N, 1]
+        x_flat = x.reshape(-1, c)
+        out = self.mlp(x_flat)   
         return out.reshape(b, h, w, 1)
 
 class EoMT_EXT(nn.Module):
@@ -85,10 +75,6 @@ class EoMT_EXT(nn.Module):
         print("EoMT_EXT: num_classes =", num_classes)
 
         self.class_head = nn.Linear(self.encoder.backbone.embed_dim, num_classes + 1)
-
-        # Unified Anomaly Head with Image Features
-        # embed_dim is usually 768 for ViT-B (check your config)
-        # We pass it to the head so it knows how to project it.
         self.anomaly_head = PixelAnomalyHead(
             input_dim=4,
             feature_dim=self.encoder.backbone.embed_dim
@@ -115,20 +101,13 @@ class EoMT_EXT(nn.Module):
         q = x[:, : self.num_q, :]
 
         class_logits = self.class_head(q)
-
-        # Extract patch tokens for features
-        # x is [B, N_tokens, C]
         patch_tokens = x[:, self.num_q + self.encoder.backbone.num_prefix_tokens :, :]
 
         # Reshape to [B, C, H, W]
-        # Transpose (B, N, C) -> (B, C, N) -> reshape
         b, n, c = patch_tokens.shape
         h, w = self.encoder.backbone.patch_embed.grid_size
-
-        # Feature map for mask generation
         feat_map = patch_tokens.transpose(1, 2).reshape(b, c, h, w)
 
-        # Upscaled features [B, C, H_up, W_up]
         upscaled_feats = self.upscale(feat_map)
 
         mask_logits = torch.einsum(
@@ -286,7 +265,6 @@ class EoMT_EXT(nn.Module):
             img_size: tuple (H, W) target resolution
             features: [B, C_embed, H_grid, W_grid] Visual features from backbone
         """
-        # 1. Feature Extraction (The Bridge)
         mask_logits_up = F.interpolate(mask_logits, size=img_size, mode="bilinear", align_corners=False)
         mask_probs = mask_logits_up.sigmoid() # [B, Q, H, W]
 
@@ -294,34 +272,17 @@ class EoMT_EXT(nn.Module):
 
         # Exclude "No Object" / "Void" class if it exists (usually last index)
         valid_class_probs = class_probs[..., :-1]
-
-        # EINSUM: Combine masks and class probs -> [B, Class_valid, H, W]
         semantic_map = torch.einsum("bqhw, bqc -> bchw", mask_probs, valid_class_probs)
-
-        # 2. Extract Uncertainty Features per pixel [B, H, W]
-        # A. Max Logit / Probability (Confidence)
         max_prob, _ = semantic_map.max(dim=1)
 
-        # B. Entropy
         semantic_map_clamped = torch.clamp(semantic_map, min=1e-7)
         entropy = -(semantic_map_clamped * torch.log(semantic_map_clamped)).sum(dim=1)
 
-        # C. Energy proxy (Sum of probs)
         energy_proxy = semantic_map.sum(dim=1)
 
-        # D. Simple MSP
         msp = 1.0 - max_prob
 
         # Stack Features: [B, H, W, 4]
         stat_features = torch.stack([max_prob, entropy, energy_proxy, msp], dim=-1)
 
-        # Normalize features (Standardization per image over H, W)
-        # REMOVING NORMALIZATION:
-        # 1. It causes instability when variance is low (std -> 0), amplifying noise.
-        # 2. It removes absolute uncertainty info (all-confident crop looks same as all-uncertain crop).
-        # mean = stat_features.mean(dim=(1, 2), keepdim=True) # [B, 1, 1, 4]
-        # std = stat_features.std(dim=(1, 2), keepdim=True)   # [B, 1, 1, 4]
-        # stat_features = (stat_features - mean) / (std + 1e-6)
-
-        # 3. MLP Forward with Visual features
         return self.anomaly_head(stat_features, features)
