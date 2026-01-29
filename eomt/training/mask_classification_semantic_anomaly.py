@@ -171,7 +171,6 @@ class MCS_Anomaly(MaskClassificationSemantic):
 
             # --- ANOMALY HEAD DIRECT PREDICTION ---
             # anomaly_head output: [Normal, Anomaly, NoObject]
-            # We want: Channel 0 = Normal, Channel 1 = Anomaly
             valid_probs = probs_anomaly[..., :2]
             mask_logits = F.interpolate(mask_logits, self.img_size, mode="bilinear")
 
@@ -251,7 +250,7 @@ class MCS_Anomaly(MaskClassificationSemantic):
         # Combination: [Input | Ground Truth | Anomaly Head | Semantic Class]
         comparison = torch.cat([img_vis, vis_t, pred_vis, fourth_vis], dim=2)
 
-        # 6. Log su WandB
+        # WanDb Logging
         try:
             if hasattr(self.logger, 'experiment') and hasattr(self.logger.experiment, 'log'):
                 from torchvision.transforms.functional import to_pil_image
@@ -266,7 +265,6 @@ class MCS_Anomaly(MaskClassificationSemantic):
         except Exception as e:
             print(f"Warning: Could not log to wandb: {e}")
 
-        # Debug locale (opzionale)
         if batch_idx == 0 and layer_idx == 0:
             save_image(comparison, f"debug_vis_{prefix}.png")
         
@@ -277,19 +275,12 @@ class MCS_Anomaly(MaskClassificationSemantic):
         using the 'tab20' colormap from Matplotlib.
         """
         import matplotlib.pyplot as plt
-        
-        # 1. Retrieve the colormap
         cmap = plt.get_cmap('tab20')
         num_colors = 20
 
-        # 2. Create a palette tensor
         palette = torch.tensor(
             [cmap(i)[:3] for i in range(num_colors)], dtype=torch.float32
         ).to(tensor_indices.device)
         
-        # 3. Apply the palette using advanced indexing
         colored_img = palette[tensor_indices.long().clamp(0, num_colors - 1)]
-        
-        # 4. Permute dimensions to match PyTorch standard (Channels First)
-        # Transformation: [H, W, 3] -> [3, H, W]
         return colored_img.permute(2, 0, 1)
