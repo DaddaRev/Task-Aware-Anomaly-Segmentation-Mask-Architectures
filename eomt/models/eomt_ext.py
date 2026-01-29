@@ -20,7 +20,6 @@ class PixelAnomalyHead(nn.Module):
         self.mlp = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
-            #nn.BatchNorm1d(hidden_dim),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.ReLU(),
@@ -31,8 +30,8 @@ class PixelAnomalyHead(nn.Module):
     def forward(self, x):
         # Input x: [B, H, W, 4]
         b, h, w, c = x.shape
-        x_flat = x.reshape(-1, c) # [N, 4]
-        out = self.mlp(x_flat)    # [N, 1]
+        x_flat = x.reshape(-1, c) 
+        out = self.mlp(x_flat)   
         return out.reshape(b, h, w, 1)
 
 class EoMT_EXT(nn.Module):
@@ -239,39 +238,23 @@ class EoMT_EXT(nn.Module):
             class_logits: [B, Q, C]
             img_size: tuple (H, W) target resolution
         """
-        # 1. Feature Extraction (The Bridge)
-        mask_logits_up = F.interpolate(mask_logits, size=img_size, mode="bilinear", align_corners=False)
-        mask_probs = mask_logits_up.sigmoid() # [B, Q, H, W]
 
-        class_probs = F.softmax(class_logits, dim=-1) # [B, Q, C]
+        mask_logits_up = F.interpolate(mask_logits, size=img_size, mode="bilinear", align_corners=False)
+        mask_probs = mask_logits_up.sigmoid() 
+
+        class_probs = F.softmax(class_logits, dim=-1) 
 
         # Exclude "No Object" / "Void" class if it exists (usually last index)
         valid_class_probs = class_probs[..., :-1]
 
-        # EINSUM: Combine masks and class probs -> [B, Class_valid, H, W]
         semantic_map = torch.einsum("bqhw, bqc -> bchw", mask_probs, valid_class_probs)
-
-        # 2. Extract Uncertainty Features per pixel [B, H, W]
-        # A. Max Logit / Probability (Confidence)
         max_prob, _ = semantic_map.max(dim=1)
 
-        # B. Entropy
         semantic_map_clamped = torch.clamp(semantic_map, min=1e-7)
         entropy = -(semantic_map_clamped * torch.log(semantic_map_clamped)).sum(dim=1)
-
-        # C. Energy proxy (Sum of probs)
         energy_proxy = semantic_map.sum(dim=1)
 
-        # D. Simple MSP
         msp = 1.0 - max_prob
-
-        # Stack Features: [B, H, W, 4]
         features = torch.stack([max_prob, entropy, energy_proxy, msp], dim=-1)
 
-        # Normalize features
-        # if features.size(0) > 1: # Batch norm style requires batch > 1 or careful handling
-        #      # Simple instance-like normalization to keep MLP stable
-        #      features = (features - features.mean(dim=(1,2), keepdim=True)) / (features.std(dim=(1,2), keepdim=True) + 1e-6)
-
-        # 3. MLP Forward
         return self.anomaly_head(features)

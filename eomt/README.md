@@ -1,91 +1,181 @@
-# EoMT
+# EoMT-EXT: Pixel-wise Anomaly Segmentation Architecture
 
-This is almost the original repository of the authors of EoMT if something is not clear refer to the [original repo](https://github.com/tue-mps/eomt). You will have to use the code in this folder and adapt it with the eval folder to be able to evaluate and train a EoMT model if needed. You can find a EoMT model trained on Cityscapes dataset with the [config file](eomt/configs/dinov2/cityscapes/semantic) at this [link](https://drive.google.com/drive/folders/1q2vHUzora2nP52fP50zmoQAykWuwoGav?usp=drive_link).
+**Reference:** Based on the original [EoMT repository](https://github.com/tue-mps/eomt)
 
-## Requirements Installation
+## Introduction
 
-If you don't have Conda installed, install Miniconda and restart your shell:
+**EoMT-EXT** (Extended Ensemble of Masks with Transformers) is a specialized architecture designed for **Anomaly Segmentation** (out-of-distribution object detection in road scenes). It extends the frozen semantic EoMT model by adding a dedicated **Pixel-wise Anomaly Head** that operates on statistical uncertainty features to explicitly classify each pixel as "Normal" or "Anomalous".
 
-```bash
-wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
-bash Miniconda3-latest-Linux-x86_64.sh
+**Key Innovation:** This architecture employs a **pixel-wise MLP** that learns to decode anomaly signals exclusively from uncertainty metrics (Entropy, Max Probability, Energy, MSP) derived from frozen semantic heads, without any visual features.
+
+---
+
+## Core Components
+
+### 1. Backbone (Frozen)
+- **Type**: `DinoV2` (Vision Transformer)
+- **Role**: Extracts powerful, general-purpose semantic representations from the input image
+- **Status**: Completely frozen during training to preserve OOD (Out-of-Distribution) robustness and learned semantic clustering
+
+### 2. Mask Head & Class Head (Frozen, Repurposed)
+
+These components are **not discarded** but frozen and repurposed as **uncertainty signal generators**:
+
+**Mask Head:**
+- **Original Function**: Generates binary mask logits for each query `[B, Q, H, W]`
+- **Role in Anomaly Detection**: Provides spatial localization of predictions
+- **Processing**: Output is interpolated to target image size and passed through **Sigmoid** to obtain mask probabilities
+
+**Class Head:**
+- **Original Function**: Projects query features into semantic class space (C classes)
+- **Role in Anomaly Detection**: Provides confidence distribution over known semantic classes
+- **Processing**: Output processed via **Softmax**
+- **Crucial Detail**: Probabilities for "Void" or "No-Object" class (typically the last class) are excluded to compute uncertainty only over in-distribution classes
+
+---
+
+## The Pixel-wise Anomaly Head (New)
+
+The defining feature of this architecture is the **PixelAnomalyHead**, a learned component that replaces traditional thresholding heuristics with a trainable pixel-wise classifier.
+
+### Statistical Feature Extraction ("The Bridge")
+
+Before feeding the Anomaly Head, signals from frozen Mask Head and Class Head are fused into a dense semantic map, from which **4 statistical uncertainty metrics** are computed:
+
+1. **Max Probability**: Maximum confidence observed for a pixel (how certain the model is about its main prediction)
+2. **Entropy**: Measures disorder in the probability distribution (high entropy indicates confusion between multiple classes)
+3. **Energy Proxy**: Sum of semantic probabilities, used as activation energy proxy
+4. **MSP (Maximum Softmax Probability)**: Computed as `1.0 - MaxProb`, represents a direct baseline for anomaly
+
+These 4 metrics are stacked to form the `stat_features` tensor of dimension `[B, H, W, 4]`, which constitutes the base input for the Anomaly Head.
+
+### Architecture
+
+A **pixel-wise Multi-Layer Perceptron (MLP)** that operates independently on each pixel:
+
+```
+Input: Statistical Features [B, H, W, 4]
+  ↓
+Linear(input_dim → hidden_dim)
+  ↓
+ReLU + BatchNorm1d + Dropout
+  ↓
+Linear(hidden_dim → hidden_dim // 2)
+  ↓
+ReLU + Dropout
+  ↓
+Linear(hidden_dim // 2 → 1)  # Anomaly Logit
 ```
 
-Then create the environment, activate it, and install the dependencies:
+### Logic
 
-```bash
-conda create -n eomt python==3.13.2
-conda activate eomt
-python3 -m pip install -r requirements.txt
+The MLP decodes anomaly signals from statistical uncertainty patterns:
+
+- **Learned Uncertainty Interpretation**: The network learns which uncertainty configurations indicate OOD samples
+- **Baseline Approach**: Evaluates whether statistical uncertainty alone contains sufficient signal for anomaly detection
+- **No Manual Thresholding**: Temperature scaling and manual threshold selection are replaced by learned parameters
+- **Pixel-wise Classification**: Each pixel receives an independent anomaly score based on local uncertainty metrics only
+
+---
+
+## Training Flow
+
+### Forward Pass Pipeline
+
+1. **Backbone Processing**: Image → Frozen DinoV2 → `mask_logits`, `class_logits`
+2. **Statistical Feature Computation**:
+   - Combine `Sigmoid(mask_logits) × Softmax(class_logits)` → Dense Semantic Map
+   - Extract Entropy, MaxProb, Energy, MSP → `stat_features` (4 channels)
+3. **Anomaly Scoring**: `PixelAnomalyHead(stat_features)` → Anomaly Logits `[B, H, W, 1]`
+
+### Loss Function
+
+**Binary Cross-Entropy with Logits** (pixel-wise classification):
+
+```python
+loss = F.binary_cross_entropy_with_logits(
+    logits, targets, 
+    pos_weight=torch.tensor([10.0]),  # Handle class imbalance
+    reduction='none'
+)
 ```
 
-[Weights & Biases](https://wandb.ai/) (wandb) is used for experiment logging and visualization. To enable wandb, log in to your account:
+**Class Imbalance Handling:**
+- `pos_weight=10.0`: Anomalous pixels penalize 10× more than normal pixels
+- Forces the model not to predict "Normal" everywhere
 
-```bash
-wandb login
-```
+**Void Masking:**
+- Valid mask constructed: `1.0` for valid pixels (Normal/Anomaly), `0.0` for Void (index 255)
+- Ensures the model is never rewarded/penalized for predictions on ignored regions
 
-## Data preparation for training
+### Update Strategy
 
-You do **not** need to unzip any of the downloaded files.  
-Simply place them in a directory of your choice and provide that path via the `--data.path` argument.  
-The code will read the `.zip` files directly.
+- **Trainable**: Only Anomaly Head parameters (~50K params depending on hidden_dim)
+- **Frozen**: Backbone (DinoV2), Mask Head, Class Head
+- **Advantage**: 3-4× faster training, preserves semantic representations
 
-**Cityscapes**
-```bash
-wget --keep-session-cookies --save-cookies=cookies.txt --post-data 'username=<your_username>&password=<your_password>&submit=Login' https://www.cityscapes-dataset.com/login/
-wget --load-cookies cookies.txt --content-disposition https://www.cityscapes-dataset.com/file-handling/?packageID=1
-wget --load-cookies cookies.txt --content-disposition https://www.cityscapes-dataset.com/file-handling/?packageID=3
-```
+---
 
-🔧 Replace `<your_username>` and `<your_password>` with your actual [Cityscapes](https://www.cityscapes-dataset.com/) login credentials.  
+## Inference Pipeline
 
-## Usage
+### Windowing and Prediction
+
+High-resolution images (e.g., Cityscapes) are divided into overlapping windows (crops):
+- Anomaly Head predicts raw logit `L` for each pixel in crop `[B, H_crop, W_crop, 1]`
+
+### Channel Construction for Compatibility
+
+For compatibility with multi-class stitching functions, the single logit is expanded into two virtual channels:
+1. **Channel 0 (Normal)**: Set to `0`
+2. **Channel 1 (Anomaly)**: Contains predicted logit `L`
+
+Resulting tensor `[B, 2, H_crop, W_crop]` is stitched back to original resolution, handling overlaps via weighted averaging.
+
+### Final Normalization
+
+**Softmax** is applied along the channel dimension
+
+**Output**: Anomaly heatmap with values in `[0, 1]`, representing per-pixel anomaly probability.
+
+---
+
+## Practical Configuration
+
+### Key Files
+
+- **`models/eomt_ext.py`**: Extended EoMT model architecture with the integrated Pixel-wise Anomaly Head. Implements the `compute_anomaly_score()` method that fuses mask/class predictions into statistical features and feeds them to the MLP.
+
+- **`training/mask_classification_semantic_anomaly.py`**: Training loop and evaluation pipeline for anomaly segmentation. Handles forward passes, loss computation with class imbalance weighting, void masking, gradient updates (anomaly head only), and metric calculation.
+
+- **`configs/dinov2/common/eomt_base_640_ext.yaml`**: Configuration file specifying all training hyperparameters, including learning rate, loss coefficients, batch size, optimizer settings, and logging preferences.
+
+### Key Hyperparameters
+
+| Parameter | Default | Meaning |
+|-----------|---------|---------|
+| `lr` | 1e-4 | Learning rate (anomaly head only) |
+| `hidden_dim` | 256 | Hidden dimension of Anomaly Head MLP |
+| `pos_weight` | 10.0 | Positive class weight (handles class imbalance) |
+| `dropout` | 0.3 | Dropout rate in MLP layers |
 
 ### Training
 
-To train EoMT from scratch (don't do it, it will be impossible to do it in Colab due to resource contraints):
+To train the Anomaly Head extension:
 
 ```bash
 python3 main.py fit \
-  -c configs/dinov2/cityscapes/semantic/eomt_base_640.yaml \
-  --trainer.devices 4 \
+  -c configs/dinov2/common/eomt_base_640_ext.yaml \
+  --trainer.devices 1 \
   --data.batch_size 4 \
-  --data.path /path/to/dataset
+  --data.path /path/to/anomaly/datasets
 ```
 
-This command trains the `EoMT-L` model with a 640×640 input size on Citiscapes segmentation using 4 GPUs. Each GPU processes a batch of 4 images, for a total batch size of 16.
+**Pre-trained Checkpoint:**  
+Download the trained model from [Google Drive](https://drive.google.com/file/d/1mWtNfEBbJ0dGu1newtvhNsVpYi3z1-Hg/view?usp=drive_link)
 
-✅ Make sure the total batch size is `devices × batch_size = 16`
-🔧 Replace `/path/to/dataset` with the directory containing the dataset zip files.
+### Evaluation
 
-To fine-tune a pre-trained EoMT model, add:
+Validation on benchmark datasets is performed via notebooks:
 
-```bash
-  --model.ckpt_path /path/to/pytorch_model.bin \
-  --model.load_ckpt_class_head False
-```
+- **[model evaluation -COLAB.ipynb](model%20evaluation%20-COLAB.ipynb)**: Complete evaluation pipeline using the learned Anomaly Head on 5 benchmark datasets (FS LaF, FS Static, LostAndFound, RoadAnomaly21, RoadObstacle21)
 
-🔧 Replace `/path/to/pytorch_model.bin` with the path to the checkpoint to fine-tune.  
-> `--model.load_ckpt_class_head False` skips loading the classification head when fine-tuning on a dataset with different classes.
-
-### Evaluating
-
-To evaluate a pre-trained EoMT model, run:
-
-```bash
-python3 main.py validate \
-  -c configs/dinov2/coco/panoptic/eomt_large_640.yaml \
-  --model.network.masked_attn_enabled False \
-  --trainer.devices 4 \
-  --data.batch_size 4 \
-  --data.path /path/to/dataset \
-  --model.ckpt_path /path/to/pytorch_model.bin
-```
-
-This command evaluates the same `EoMT-L` model using 4 GPUs with a batch size of 4 per GPU.
-
-🔧 Replace `/path/to/dataset` with the directory containing the dataset zip files.  
-🔧 Replace `/path/to/pytorch_model.bin` with the path to the checkpoint to evaluate.
-
-A [notebook](inference.ipynb) is available for quick inference and visualization with auto-downloaded pre-trained models.
