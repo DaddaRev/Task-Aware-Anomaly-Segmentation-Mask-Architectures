@@ -95,12 +95,6 @@ The MLP decodes the intrinsic "abnormality" signal directly from geometric and s
 
 - **`eomt/configs/dinov2/common/eomt_base_640_ext_kaggleinput.yaml`**: Configuration file specifying all training hyperparameters, including learning rate, loss coefficients, number of blocks, batch size, optimizer settings, and logging preferences.
 
-### Training
-
-```bash
-python eomt/main.py --config eomt/configs/dinov2/common/generic_anomaly.yaml
-```
-
 ### Key Hyperparameters
 
 | Parameter | Default | Meaning |
@@ -110,14 +104,3 @@ python eomt/main.py --config eomt/configs/dinov2/common/generic_anomaly.yaml
 | `mask_coefficient` | 2.0 | Spatial loss weight |
 | `dice_coefficient` | 4.0 | Dice loss weight |
 | `class_coefficient` | 4.0 | Class loss weight |
-
-### Dataset Format
-
-```
-targets = {
-    "masks": [N, H, W],              # binary masks per instance
-    "labels": [N] ∈ {0, 1, 255}      # 0=Normal, 1=Anomaly, 255=Void
-}
-```
-
-Void pixels (255) automatically filtered during training/evaluation.
