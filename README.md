@@ -34,7 +34,7 @@ This repository is organized to support a full development path from baseline an
 
 This repository includes code for **synthetic anomaly dataset generation**. The generation pipeline and related scripts are available at:
 
-**Link:** [https://github.com/Giacomo-FMJ/MaskArchitectureAnomaly/tree/main/cityscapes_coco_anomaly](https://github.com/Giacomo-FMJ/MaskArchitectureAnomaly/tree/main/cityscapes_coco_anomaly)
+**Link:** [Syntethic dataset genration](https://github.com/DaddaRev/Task-Aware-Anomaly-Segmentation-Mask-Architectures/tree/main/cityscapes_coco_anomaly)
 
 ---
 
@@ -44,14 +44,14 @@ This repository contains multiple branches, each implementing different anomaly 
 
 ### Main Extensions (Proposed Architectures)
 
-1. **[`main`](https://github.com/Giacomo-FMJ/MaskArchitectureAnomaly/tree/main)** - Current branch containing the base project structure and ERFNet baseline
-2. **[`fine-tuning_anomaly_head_revised`](https://github.com/Giacomo-FMJ/MaskArchitectureAnomaly/tree/fine-tuning_anomaly_head_revised)** - First proposed extension architecture implementing a **Statistical Uncertainty-based Pixel-wise Anomaly Head** (stats-only approach)
-3. **[`fine-tuning_anomaly_head_revised_features`](https://github.com/Giacomo-FMJ/MaskArchitectureAnomaly/tree/fine-tuning_anomaly_head_revised_features)** - Second proposed extension architecture implementing a **Hybrid Pixel-wise Anomaly Head** (statistical uncertainty + visual features from backbone)
+1. **[`main`](https://github.com/DaddaRev/Task-Aware-Anomaly-Segmentation-Mask-Architectures/tree/main)** - Current branch containing the base project structure and ERFNet baseline
+2. **[`fine-tuning_anomaly_head_revised`](https://github.com/DaddaRev/Task-Aware-Anomaly-Segmentation-Mask-Architectures/tree/fine-tuning_anomaly_head_revised)** - First proposed extension architecture implementing a **Statistical Uncertainty-based Pixel-wise Anomaly Head** (stats-only approach)
+3. **[`fine-tuning_anomaly_head_revised_features`](https://github.com/DaddaRev/Task-Aware-Anomaly-Segmentation-Mask-Architectures/tree/fine-tuning_anomaly_head_revised_features)** - Second proposed extension architecture implementing a **Hybrid Pixel-wise Anomaly Head** (statistical uncertainty + visual features from backbone)
 
 ### Additional Experimental Branches (Less Relevant)
 
-4. **[`fine-tuning_anomaly_scores`](https://github.com/Giacomo-FMJ/MaskArchitectureAnomaly/tree/fine-tuning_anomaly_scores)** - Alternative baseline approach with anomaly scoring (not extensively covered in the report)
-5. **[`fine-tuning_only_queries`](https://github.com/Giacomo-FMJ/MaskArchitectureAnomaly/tree/fine-tuning_only_queries)** - Query-based anomaly detection baseline (not extensively covered in the report)
+4. **[`fine-tuning_anomaly_scores`](https://github.com/DaddaRev/Task-Aware-Anomaly-Segmentation-Mask-Architectures/tree/fine-tuning_anomaly_scores)** - Alternative baseline approach with anomaly scoring (not extensively covered in the report)
+5. **[`fine-tuning_only_queries`](https://github.com/DaddaRev/Task-Aware-Anomaly-Segmentation-Mask-Architectures/tree/fine-tuning_only_queries)** - Query-based anomaly detection baseline (not extensively covered in the report)
 
 > **Note:** The core contributions and detailed documentation are available in branches 2 and 3.
 
